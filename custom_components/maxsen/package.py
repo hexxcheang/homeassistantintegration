@@ -21,15 +21,16 @@ PackageReason = Literal[
     "missing_image",
 ]
 
-# Image ids become file names, so they must not be able to leave the folder.
-_SAFE_IMAGE_ID = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
+# Image ids become file names and URL segments, so they must not be able to
+# leave the folder. The image view serves exactly what this accepts.
+IMAGE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 PLAN_TYPES = ("smart-home", "lighting")
 
+# The only image types a package may carry, with the extension they are saved as.
 IMAGE_EXTENSIONS = {
     "image/png": "png",
     "image/jpeg": "jpg",
-    "image/jpg": "jpg",
     "image/webp": "webp",
 }
 
@@ -64,9 +65,10 @@ def _validate_structure(pkg: dict) -> None:
     images = pkg.get("images")
     _check(isinstance(images, dict))
     for image_id, image in images.items():
-        _check(bool(_SAFE_IMAGE_ID.match(image_id)))
+        _check(bool(IMAGE_ID_PATTERN.match(image_id)))
         _check(isinstance(image, dict))
-        _check(_is_str(image.get("mediaType")) and _is_str(image.get("data")))
+        _check(image.get("mediaType") in IMAGE_EXTENSIONS)
+        _check(_is_str(image.get("data")))
 
     levels = pkg.get("levels")
     _check(isinstance(levels, list))
@@ -81,7 +83,9 @@ def _validate_structure(pkg: dict) -> None:
             _check(plan.get("type") in PLAN_TYPES)
             _check(_is_int(plan.get("revision")))
             background = plan.get("background")
-            _check(isinstance(background, dict) and _is_str(background.get("imageId")))
+            _check(isinstance(background, dict))
+            image_id = background.get("imageId")
+            _check(_is_str(image_id) and bool(IMAGE_ID_PATTERN.match(image_id)))
             elements = plan.get("elements")
             _check(isinstance(elements, list))
             for element in elements:
@@ -134,7 +138,9 @@ async def save_images(hass: HomeAssistant, entry_id: str, pkg: dict) -> dict:
             data = base64.b64decode(image["data"], validate=True)
         except (binascii.Error, ValueError) as err:
             raise PackageError("wrong_format") from err
-        ext = IMAGE_EXTENSIONS.get(media_type, "bin")
+        if media_type not in IMAGE_EXTENSIONS or not IMAGE_ID_PATTERN.match(image_id):
+            raise PackageError("wrong_format")
+        ext = IMAGE_EXTENSIONS[media_type]
         decoded[f"{image_id}.{ext}"] = (media_type, data)
         image_types[image_id] = media_type
 

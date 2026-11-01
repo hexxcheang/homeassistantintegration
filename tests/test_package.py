@@ -163,16 +163,67 @@ async def test_save_images_writes_files_and_strips_data(hass, home_package, tmp_
 async def test_save_images_extension_follows_media_type(hass, home_package, tmp_path):
     hass.config.config_dir = str(tmp_path)
     home_package["images"]["file-l1"]["mediaType"] = "image/jpeg"
-    home_package["images"]["file-l2"]["mediaType"] = "application/x-weird"
+    home_package["images"]["file-l2"]["mediaType"] = "image/webp"
 
     saved = await save_images(hass, "entry1", home_package)
 
     folder = tmp_path / "maxsen" / "entry1"
-    assert sorted(p.name for p in folder.iterdir()) == ["file-l1.jpg", "file-l2.bin"]
+    assert sorted(p.name for p in folder.iterdir()) == ["file-l1.jpg", "file-l2.webp"]
     assert saved["image_types"] == {
         "file-l1": "image/jpeg",
-        "file-l2": "application/x-weird",
+        "file-l2": "image/webp",
     }
+
+
+def _rename_image(pkg, old, new):
+    pkg["images"][new] = pkg["images"].pop(old)
+    for level in pkg["levels"]:
+        for plan in level["plans"]:
+            if plan["background"]["imageId"] == old:
+                plan["background"]["imageId"] = new
+
+
+@pytest.mark.parametrize("image_id", ["floor.1", "x" * 65, "a b", "a/b", ""])
+def test_parse_rejects_image_ids_the_image_view_would_not_serve(home_package, image_id):
+    _rename_image(home_package, "file-l1", image_id)
+    assert reason_of(to_raw(home_package)) == "wrong_format"
+
+
+def test_parse_accepts_the_longest_allowed_image_id(home_package):
+    _rename_image(home_package, "file-l1", "A_b-" * 16)
+    assert parse_package(to_raw(home_package))
+
+
+def test_parse_rejects_a_background_image_id_outside_the_pattern(home_package):
+    home_package["levels"][0]["plans"][0]["background"]["imageId"] = "floor.1"
+    home_package["images"]["floor.1"] = home_package["images"]["file-l1"]
+    del home_package["images"]["file-l1"]
+    assert reason_of(to_raw(home_package)) == "wrong_format"
+
+
+@pytest.mark.parametrize(
+    "media_type", ["image/gif", "image/jpg", "image/svg+xml", "text/html", ""]
+)
+def test_parse_rejects_media_types_outside_png_jpeg_webp(home_package, media_type):
+    home_package["images"]["file-l1"]["mediaType"] = media_type
+    assert reason_of(to_raw(home_package)) == "wrong_format"
+
+
+@pytest.mark.parametrize("media_type", ["image/png", "image/jpeg", "image/webp"])
+def test_parse_accepts_png_jpeg_webp(home_package, media_type):
+    home_package["images"]["file-l1"]["mediaType"] = media_type
+    assert parse_package(to_raw(home_package))
+
+
+async def test_save_images_refuses_a_type_it_has_no_extension_for(
+    hass, home_package, tmp_path
+):
+    hass.config.config_dir = str(tmp_path)
+    home_package["images"]["file-l1"]["mediaType"] = "image/gif"
+    with pytest.raises(PackageError) as err:
+        await save_images(hass, "entry1", home_package)
+    assert err.value.reason == "wrong_format"
+    assert not (tmp_path / "maxsen").exists()
 
 
 async def test_save_images_bad_base64_writes_nothing(hass, home_package, tmp_path):

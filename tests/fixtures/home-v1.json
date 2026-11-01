@@ -1,0 +1,185 @@
+{
+  "format": "maxsen-home",
+  "schemaVersion": 1,
+  "project": {
+    "id": "proj-1",
+    "title": "Test House"
+  },
+  "exportedAt": "2026-11-01T08:00:00.000Z",
+  "savedVersion": 3,
+  "levels": [
+    {
+      "id": "level-1",
+      "name": "Level 1",
+      "sortOrder": 0,
+      "plans": [
+        {
+          "id": "plan-1-sh",
+          "type": "smart-home",
+          "revision": 2,
+          "width": 1000,
+          "height": 1000,
+          "background": {
+            "imageId": "img-1",
+            "key": "page-1|0|0,0,1,1"
+          },
+          "scene": {
+            "items": [
+              {
+                "type": "marker",
+                "elementId": "e1",
+                "x": 200,
+                "y": 300,
+                "rotation": 0,
+                "size": 24,
+                "pathD": "M-0.5 -0.5H0.5V0.5H-0.5Z"
+              },
+              {
+                "type": "marker",
+                "elementId": "e4",
+                "x": 700,
+                "y": 300,
+                "rotation": 0,
+                "size": 20,
+                "pathD": "M-0.5 0A0.5 0.5 0 1 0 0.5 0A0.5 0.5 0 1 0 -0.5 0"
+              },
+              {
+                "type": "label",
+                "elementId": "e1",
+                "x": 200,
+                "y": 330,
+                "text": "Entrance switch"
+              }
+            ]
+          },
+          "elements": [
+            {
+              "id": "e1",
+              "categoryId": "smart-switches",
+              "kind": "point",
+              "productName": "Maxsen 3-Gang Smart Switch",
+              "variantName": "White",
+              "label": "Entrance switch",
+              "drawn": true
+            },
+            {
+              "id": "e4",
+              "categoryId": "sensors",
+              "kind": "point",
+              "productName": "Maxsen Door Sensor",
+              "variantName": "White",
+              "label": "",
+              "drawn": true
+            }
+          ]
+        },
+        {
+          "id": "plan-1-lt",
+          "type": "lighting",
+          "revision": 1,
+          "width": 1000,
+          "height": 1000,
+          "background": {
+            "imageId": "img-1",
+            "key": "page-1|0|0,0,1,1"
+          },
+          "scene": {
+            "items": [
+              {
+                "type": "marker",
+                "elementId": "e2",
+                "x": 400,
+                "y": 500,
+                "rotation": 0,
+                "size": 16,
+                "pathD": "M-0.5 0A0.5 0.5 0 1 0 0.5 0A0.5 0.5 0 1 0 -0.5 0"
+              },
+              {
+                "type": "marker",
+                "elementId": "e3",
+                "x": 600,
+                "y": 500,
+                "rotation": 0,
+                "size": 16,
+                "pathD": "M-0.5 0A0.5 0.5 0 1 0 0.5 0A0.5 0.5 0 1 0 -0.5 0"
+              }
+            ]
+          },
+          "elements": [
+            {
+              "id": "e2",
+              "categoryId": "downlights",
+              "kind": "point",
+              "productName": "Maxsen Downlight 9W",
+              "variantName": "Warm white",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "e3",
+              "categoryId": "downlights",
+              "kind": "point",
+              "productName": "Maxsen Downlight 9W",
+              "variantName": "Warm white",
+              "label": "",
+              "drawn": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "level-2",
+      "name": "Level 2",
+      "sortOrder": 1,
+      "plans": [
+        {
+          "id": "plan-2-sh",
+          "type": "smart-home",
+          "revision": 1,
+          "width": 1000,
+          "height": 750,
+          "background": {
+            "imageId": "img-2",
+            "key": "page-2|90|0,0,1,1"
+          },
+          "scene": {
+            "items": [
+              {
+                "type": "path",
+                "elementId": "e5",
+                "d": "M100 100L900 100",
+                "strokeWidth": 4,
+                "dash": [
+                  8,
+                  4
+                ]
+              }
+            ]
+          },
+          "elements": [
+            {
+              "id": "e5",
+              "categoryId": "curtains-blinds",
+              "kind": "curtain",
+              "productName": "Maxsen Curtain Motor",
+              "variantName": "Grey",
+              "label": "Bedroom curtain",
+              "drawn": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "images": {
+    "img-1": {
+      "mediaType": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+    },
+    "img-2": {
+      "mediaType": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4ceIEAAS0AlkWLoFAAAAAAElFTkSuQmCC"
+    }
+  }
+}

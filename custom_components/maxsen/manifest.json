@@ -1,0 +1,12 @@
+{
+  "domain": "maxsen",
+  "name": "Maxsen Home",
+  "codeowners": ["@hexxcheang"],
+  "config_flow": true,
+  "dependencies": ["http", "frontend", "panel_custom", "websocket_api", "file_upload"],
+  "documentation": "https://github.com/hexxcheang/homeassistantintegration",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/hexxcheang/homeassistantintegration/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

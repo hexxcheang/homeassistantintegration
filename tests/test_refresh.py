@@ -1,7 +1,9 @@
 """Tests for maxsen/refresh/preview and maxsen/refresh/apply."""
 
+import asyncio
 import copy
 import json
+import threading
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -400,6 +402,75 @@ async def test_a_failed_save_reports_save_failed_and_keeps_the_old_home(
     assert entry.runtime_data.data == before
 
 
+async def test_a_failed_store_save_leaves_memory_as_it_was(
+    hass, hass_ws_client, aioclient_mock, entry, home_package
+):
+    aioclient_mock.get(HOME_URL, json=changed_package(home_package))
+    ws = await hass_ws_client()
+    previewed = (await preview(ws, entry))["result"]
+    before = copy.deepcopy(entry.runtime_data.data)
+
+    with patch(
+        "homeassistant.helpers.storage.Store.async_save", side_effect=OSError("disk full")
+    ):
+        resp = await apply(ws, entry, previewed["preview_id"])
+
+    assert resp["error"]["code"] == "save_failed"
+    data = entry.runtime_data.data
+    assert data["package"] == before["package"]
+    assert data["links"] == before["links"]
+    assert data["quick_panel"] == before["quick_panel"]
+
+
+async def test_overlapping_applies_never_delete_each_others_images(
+    hass, hass_ws_client, aioclient_mock, entry, home_package
+):
+    first = changed_package(home_package)
+    second = copy.deepcopy(home_package)
+    second["images"]["file-l3"] = second["images"]["file-l2"]
+    second["levels"][1]["plans"][0]["background"]["imageId"] = "file-l3"
+    del second["images"]["file-l2"]
+    second["levels"][1]["plans"][0]["revision"] += 1
+
+    reached, release = threading.Event(), threading.Event()
+    import custom_components.maxsen.package as package_module
+
+    real_cleanup = package_module._remove_unreferenced
+    calls = []
+
+    def slow_first_cleanup(folder, keep):
+        calls.append(keep)
+        if len(calls) == 1:  # the first apply stalls while deleting old images
+            reached.set()
+            release.wait(5)
+        real_cleanup(folder, keep)
+
+    ws = await hass_ws_client()
+    aioclient_mock.get(HOME_URL, json=first)
+    id_a = (await preview(ws, entry))["result"]["preview_id"]
+    with patch.object(package_module, "_remove_unreferenced", slow_first_cleanup):
+        await ws.send_json_auto_id(
+            {"type": "maxsen/refresh/apply", "entry_id": entry.entry_id, "preview_id": id_a}
+        )
+        assert await hass.async_add_executor_job(reached.wait, 5)
+
+        aioclient_mock.clear_requests()
+        aioclient_mock.get(HOME_URL, json=second)
+        id_b = (await preview(ws, entry))["result"]["preview_id"]
+        await ws.send_json_auto_id(
+            {"type": "maxsen/refresh/apply", "entry_id": entry.entry_id, "preview_id": id_b}
+        )
+        await asyncio.sleep(0.1)  # let the second apply run as far as it can
+        release.set()
+        results = [await ws.receive_json(), await ws.receive_json()]
+
+    assert all(r["success"] for r in results), results
+    package = entry.runtime_data.data["package"]
+    expected = {f"{image_id}.png" for image_id in package["image_types"]}
+    assert expected  # the final home has images
+    assert image_files(hass, entry) == expected
+
+
 # ------------------------------------------------------- the preview lifetime
 
 
@@ -545,3 +616,47 @@ async def test_a_bad_uploaded_file_is_invalid_package(
         resp = await preview(ws, entry, file_id=FILE_ID)
     assert resp["error"]["code"] == "invalid_package"
     assert "invalid_json" in resp["error"]["message"]
+
+
+# ------------------------------------------------------- which project it is for
+
+
+def other_project(package: dict) -> dict:
+    package = copy.deepcopy(package)
+    package["project"]["id"] = "proj-someone-else"
+    return package
+
+
+async def test_an_uploaded_file_for_another_project_is_rejected(
+    hass, hass_ws_client, entry, tmp_path, home_package
+):
+    ws = await hass_ws_client()
+    with upload_file(tmp_path, json.dumps(other_project(home_package)).encode()):
+        resp = await preview(ws, entry, file_id=FILE_ID)
+
+    assert resp["error"]["code"] == "invalid_package"
+    assert resp["error"]["message"] == "This home file is for a different project."
+    # Nothing was kept to apply.
+    resp = await apply(ws, entry, "anything")
+    assert resp["error"]["code"] == "preview_expired"
+
+
+async def test_a_file_home_rejects_another_projects_file_too(
+    hass, hass_ws_client, tmp_path, home_package
+):
+    entry = await setup_entry(hass, home_package, source="file")
+    ws = await hass_ws_client()
+    with upload_file(tmp_path, json.dumps(other_project(home_package)).encode()):
+        resp = await preview(ws, entry, file_id=FILE_ID)
+    assert resp["error"]["message"] == "This home file is for a different project."
+
+
+async def test_a_fetched_package_for_another_project_is_rejected(
+    hass, hass_ws_client, aioclient_mock, entry, home_package
+):
+    aioclient_mock.get(HOME_URL, json=other_project(home_package))
+    ws = await hass_ws_client()
+    resp = await preview(ws, entry)
+    assert resp["error"]["code"] == "invalid_package"
+    assert resp["error"]["message"] == "This home file is for a different project."
+    assert entry.runtime_data.data["links"]["dl2"] == {"type": "entity", "id": "light.two"}

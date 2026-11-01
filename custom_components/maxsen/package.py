@@ -162,12 +162,16 @@ def _remove_unreferenced(folder: Path, keep: set[str]) -> None:
 
 
 async def remove_unreferenced_images(
-    hass: HomeAssistant, entry_id: str, slim: dict
+    hass: HomeAssistant, entry_id: str, slim: dict | None
 ) -> None:
-    """Delete saved image files that the (slim) package no longer references."""
+    """Delete saved image files that the (slim) package no longer references.
+
+    Pass the package as it is stored right now, not one from earlier.
+    """
+    image_types = slim["image_types"] if slim else {}
     keep = {
         f"{image_id}.{IMAGE_EXTENSIONS[media_type]}"
-        for image_id, media_type in slim["image_types"].items()
+        for image_id, media_type in image_types.items()
     }
     folder = Path(hass.config.path("maxsen", entry_id))
     await hass.async_add_executor_job(_remove_unreferenced, folder, keep)

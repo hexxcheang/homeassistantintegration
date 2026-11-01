@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from datetime import datetime, timedelta
 from typing import Any
@@ -37,6 +38,9 @@ class MaxsenStore:
         self.data: dict[str, Any] = _empty()
         # The one live refresh preview: (preview id, expiry, parsed package with
         # images). Memory only; a restart or a newer preview drops it.
+        # Held by a refresh apply from taking the preview to deleting old images,
+        # so two applies never interleave.
+        self.refresh_lock = asyncio.Lock()
         self._preview: tuple[str, datetime, dict[str, Any]] | None = None
 
     async def async_load(self) -> None:
@@ -103,8 +107,7 @@ class MaxsenStore:
         self, slim: dict[str, Any], removed_ids: set[str]
     ) -> None:
         """Save a refreshed package and drop links and quick-panel items of removed elements."""
-        self.data["package"] = slim
-        self.data["links"] = {
+        links = {
             element_id: link
             for element_id, link in self.data["links"].items()
             if element_id not in removed_ids
@@ -115,8 +118,10 @@ class MaxsenStore:
             if not (item["type"] == "element" and item["id"] in removed_ids)
         ]
         panel_changed = len(panel) != len(self.data["quick_panel"])
-        self.data["quick_panel"] = panel
-        await self._store.async_save(self.data)
+        # Save first: when saving fails, memory must still match what is on disk.
+        new_data = {**self.data, "package": slim, "links": links, "quick_panel": panel}
+        await self._store.async_save(new_data)
+        self.data = new_data
         for event in ("home", "links", "quick_panel"):
             self._announce(event)
         if panel_changed:

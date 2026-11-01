@@ -15,6 +15,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import (
     CONF_INSTALLER_MODE,
+    CONF_PROJECT_ID,
     CONF_PLANNER_URL,
     CONF_SOURCE,
     CONF_TOKEN,
@@ -266,6 +267,12 @@ async def ws_refresh_preview(
         )
         return
 
+    if package["project"]["id"] != entry.data[CONF_PROJECT_ID]:
+        connection.send_error(
+            msg["id"], "invalid_package", "This home file is for a different project."
+        )
+        return
+
     store = entry.runtime_data
     summary = describe_changes(store.data["package"], package)
     connection.send_result(
@@ -291,27 +298,28 @@ async def ws_refresh_apply(
         return
 
     store = entry.runtime_data
-    package = store.take_preview(msg["preview_id"])
-    if package is None:
-        connection.send_error(
-            msg["id"], "preview_expired", "The preview expired. Preview again."
-        )
-        return
+    async with store.refresh_lock:
+        package = store.take_preview(msg["preview_id"])
+        if package is None:
+            connection.send_error(
+                msg["id"], "preview_expired", "The preview expired. Preview again."
+            )
+            return
 
-    summary = describe_changes(store.data["package"], package)
-    removed_ids = {element["id"] for element in summary["removed"]}
-    try:
-        slim = await save_images(hass, entry.entry_id, package)
-        await store.async_apply_refresh(slim, removed_ids)
-    except (PackageError, OSError):
-        _LOGGER.warning("Could not save the refreshed home", exc_info=True)
-        connection.send_error(
-            msg["id"], "save_failed", "Could not save the refreshed home"
-        )
-        return
-    try:
-        await remove_unreferenced_images(hass, entry.entry_id, slim)
-    except OSError:
-        _LOGGER.warning("Could not delete old images", exc_info=True)
+        summary = describe_changes(store.data["package"], package)
+        removed_ids = {element["id"] for element in summary["removed"]}
+        try:
+            slim = await save_images(hass, entry.entry_id, package)
+            await store.async_apply_refresh(slim, removed_ids)
+        except (PackageError, OSError):
+            _LOGGER.warning("Could not save the refreshed home", exc_info=True)
+            connection.send_error(
+                msg["id"], "save_failed", "Could not save the refreshed home"
+            )
+            return
+        try:
+            await remove_unreferenced_images(hass, entry.entry_id, store.data["package"])
+        except OSError:
+            _LOGGER.warning("Could not delete old images", exc_info=True)
 
     connection.send_result(msg["id"], {"preview_id": msg["preview_id"], **summary})

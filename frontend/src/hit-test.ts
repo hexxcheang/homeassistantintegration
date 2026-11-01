@@ -1,19 +1,27 @@
 import type { Pt } from './types.ts';
 
-/** A marker's touch area: a circle of `hitRadius` around its centre. */
+/**
+ * A marker's touch area: a circle of `hitRadius` around its centre. `glyphRadius` is how far the
+ * marker itself is drawn from its centre, when that is known (see `elementsAt`).
+ */
 export interface MarkerHit {
   elementId: string;
   x: number;
   y: number;
   hitRadius: number;
+  glyphRadius?: number;
 }
 
-/** A line's touch area: a stroke of half-width `hitRadius` along its points, with round ends. */
+/**
+ * A line's touch area: a stroke of half-width `hitRadius` along its points, with round ends.
+ * `glyphRadius` is the half-width the line itself is drawn with, when that is known.
+ */
 export interface PathHit {
   elementId: string;
   points: Pt[];
   closed?: boolean;
   hitRadius: number;
+  glyphRadius?: number;
 }
 
 /**
@@ -62,12 +70,19 @@ export function distanceToPath(point: Pt, points: Pt[], closed = false): number 
 }
 
 /**
- * The elements whose touch area holds `point`, nearest first. Everything is in the same unit
- * (screen pixels in the view). An element with several areas (a marker and its reading) is listed
- * once, at its nearest one. Elements at the same distance keep the order they first appear in.
+ * The elements whose touch area holds `point`, best first. Everything is in the same unit (screen
+ * pixels in the view). An element with several areas (a marker and its reading) is listed once, at
+ * its nearest one. Elements at the same distance keep the order they first appear in.
+ *
+ * A point inside what a device itself is drawn as (a marker within `glyphRadius` of its centre, a
+ * line within `glyphRadius` of its stroke) belongs to that device first: when exactly one device's
+ * glyph holds the point it is the only one returned (a reading pill or label, or another device's
+ * touch halo, that happens to cover it does not take it), and when several do they come first,
+ * nearest first. Only when no glyph holds the point do the pills, labels and halos decide, nearest first.
  */
 export function elementsAt(point: Pt, items: readonly HitItem[]): string[] {
   const nearest = new Map<string, number>();
+  const inGlyph = new Map<string, number>();
   for (const item of items) {
     const distance =
       'points' in item
@@ -77,7 +92,14 @@ export function elementsAt(point: Pt, items: readonly HitItem[]): string[] {
           : Math.hypot(point.x - item.x, point.y - item.y);
     if (distance > item.hitRadius) continue;
     nearest.set(item.elementId, Math.min(distance, nearest.get(item.elementId) ?? Infinity));
+    if (!('w' in item) && item.glyphRadius !== undefined && distance <= item.glyphRadius) {
+      inGlyph.set(item.elementId, Math.min(distance, inGlyph.get(item.elementId) ?? Infinity));
+    }
   }
+  const byDistance = (a: [string, number], b: [string, number]) => a[1] - b[1];
   // Array.prototype.sort is stable, so equal distances keep the order the elements were first hit in.
-  return [...nearest].sort((a, b) => a[1] - b[1]).map(([elementId]) => elementId);
+  const glyphs = [...inGlyph].sort(byDistance).map(([elementId]) => elementId);
+  if (glyphs.length === 1) return glyphs;
+  const rest = [...nearest].filter(([elementId]) => !inGlyph.has(elementId)).sort(byDistance);
+  return [...glyphs, ...rest.map(([elementId]) => elementId)];
 }

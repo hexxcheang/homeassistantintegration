@@ -123,3 +123,43 @@ describe('elementsAt with box items', () => {
     expect(elementsAt({ x: 40, y: 50 }, [marker, other, pill])).toEqual(['sen']);
   });
 });
+
+describe('elementsAt with drawn glyphs (N2)', () => {
+  // A camera marker drawn 10 px across (glyph radius 5) with a 22 px touch halo, and an aircon whose
+  // reading pill is a box covering the camera's centre.
+  const camera = { elementId: 'camera', x: 100, y: 100, hitRadius: 22, glyphRadius: 5 };
+  const pill = { elementId: 'aircon', x: 90, y: 94, w: 60, h: 12, hitRadius: 4 };
+  const aircon = { elementId: 'aircon', x: 300, y: 100, hitRadius: 22, glyphRadius: 5 };
+
+  it('a point inside exactly one glyph belongs to that device alone, though a pill and halos reach it', () => {
+    expect(elementsAt({ x: 102, y: 100 }, [pill, aircon, camera])).toEqual(['camera']);
+    // Without glyph radii the pill (distance 0) still wins, as before.
+    expect(elementsAt({ x: 102, y: 100 }, [pill, { ...camera, glyphRadius: undefined }])).toEqual(['aircon', 'camera']);
+  });
+
+  it('on the pill away from the glyph, the pill decides: the camera halo does not make it ambiguous', () => {
+    expect(elementsAt({ x: 140, y: 100 }, [pill, aircon, camera])).toEqual(['aircon']);
+    // Within the camera halo but outside its glyph and on the pill: both are listed, the pill's owner first.
+    expect(elementsAt({ x: 112, y: 100 }, [pill, aircon, camera])).toEqual(['aircon', 'camera']);
+  });
+
+  it('the edge of a glyph is inside it', () => {
+    expect(elementsAt({ x: 105, y: 100 }, [pill, camera])).toEqual(['camera']);
+    expect(elementsAt({ x: 105.01, y: 100 }, [pill, camera])).toEqual(['aircon', 'camera']);
+  });
+
+  it('a line is inside its glyph within its drawn stroke', () => {
+    const strip = { elementId: 'strip', points: [{ x: 0, y: 50 }, { x: 200, y: 50 }], hitRadius: 22, glyphRadius: 3 };
+    const label = { elementId: 'other', x: 90, y: 44, w: 40, h: 12, hitRadius: 4 };
+    expect(elementsAt({ x: 100, y: 52 }, [label, strip])).toEqual(['strip']);
+    expect(elementsAt({ x: 100, y: 54 }, [label, strip])).toEqual(['other', 'strip']);
+  });
+
+  it('several glyphs holding the point are listed first, nearest first, then the rest', () => {
+    const near = { elementId: 'near', x: 104, y: 100, hitRadius: 22, glyphRadius: 8 };
+    const far = { elementId: 'far', x: 111, y: 100, hitRadius: 22, glyphRadius: 8 };
+    const halo = { elementId: 'halo', x: 100, y: 118, hitRadius: 22, glyphRadius: 4 };
+    // `aircon` is only under its pill, `halo` only within its touch halo: both come after the two glyphs.
+    expect(elementsAt({ x: 106, y: 102 }, [pill, halo, far, near])).toEqual(['near', 'far', 'aircon', 'halo']);
+  });
+});

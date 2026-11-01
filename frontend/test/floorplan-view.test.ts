@@ -865,15 +865,83 @@ describe('readings and labels beside devices', () => {
 
     expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['switch.hall'] });
   });
+
+  describe('N2: a device drawn under another device\'s reading pill', () => {
+    // The sensor's pill ("24 °C", sen1 stands in for the aircon) runs from x 436 to about 505 at y 150.
+    // The switch sw1 (the camera) is moved to (490, 150): its drawn 20 units sit under the pill's end,
+    // 70 units from the sensor's own marker, so that marker's touch circle does not reach it.
+    const underPill = (): StoredHomePackage => {
+      const pkg = structuredClone(homeResponse().package as StoredHomePackage);
+      const sw1 = pkg.levels[0]!.plans[0]!.scene.items.find((i) => i.elementId === 'sw1')!;
+      if (sw1.type !== 'marker') throw new Error('sw1 should be a marker');
+      Object.assign(sw1, { x: 490, y: 150 });
+      return pkg;
+    };
+
+    it('a tap on the camera icon acts on the camera directly, not on the aircon whose pill covers it', async () => {
+      const hass = sensorHass();
+      const call = vi.spyOn(hass, 'callService');
+      const view = await mountView({ hass, home: homeResponse({ package: underPill(), links: SENSOR_LINKS }) });
+      const seen: unknown[] = [];
+      view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+
+      tapElement(view, 'sw1');
+      await settle(view);
+
+      expect(picker(view)).toBeNull();
+      expect(seen).toEqual([]);
+      expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['switch.hall'] });
+    });
+
+    it('a tap on the pill away from the camera icon acts on the aircon', async () => {
+      const hass = sensorHass();
+      const call = vi.spyOn(hass, 'callService');
+      const view = await mountView({ hass, home: homeResponse({ package: underPill(), links: SENSOR_LINKS }) });
+      const seen: unknown[] = [];
+      view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+
+      const at = planPoint(view, 450, 150);
+      tap(stageOf(view), at.x, at.y);
+      await settle(view);
+
+      expect(picker(view)).toBeNull();
+      expect(seen).toEqual([{ entityId: 'sensor.temp' }]);
+      expect(call).not.toHaveBeenCalled();
+    });
+
+    it('beside the camera icon, outside its drawing but inside its touch circle and the pill, it is still a choice, the pill\'s owner first', async () => {
+      const view = await mountView({ hass: sensorHass(), home: homeResponse({ package: underPill(), links: SENSOR_LINKS }) });
+      const c = elementPoint(view, 'sw1');
+      // Marker radius 10 units = about 6 px here; 12 px along the pill is past it and inside 22 px.
+      tap(stageOf(view), c.x - 12, c.y);
+      await settle(view);
+
+      expect(rowTexts(view).map((r) => r[0])).toEqual(['Door/Window Sensor', 'Entrance switch']);
+    });
+
+    it('holding the camera icon opens its details directly', async () => {
+      const view = await mountView({ hass: sensorHass(), home: homeResponse({ package: underPill(), links: SENSOR_LINKS }) });
+      const seen: unknown[] = [];
+      view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+      vi.useFakeTimers();
+
+      pressElement(view, 'sw1');
+      vi.advanceTimersByTime(600);
+
+      expect(picker(view)).toBeNull();
+      expect(seen).toEqual([{ entityId: 'switch.hall' }]);
+    });
+  });
 });
 
 // ---- overlapping devices ----
 
 /**
  * The fixture's Level 1 with a cluster drawn at (cx, cy): switch `sw1`, a second switch `sw2` 30
- * units to its right, a downlight `dl1` 12 units from the first switch and an LED strip `led1`
- * running 20 units below it. Their touch areas (22 px, about 26 units) overlap, as in the system
- * test where lighting sat on top of the smart-home devices.
+ * units to its right, a downlight `dl1` drawn over the first switch (6 units from its centre, inside its 20-unit
+ * drawing) and an LED strip `led1` running 20 units below it. The two markers are drawn over each
+ * other and the strip's touch area (22 px, about 26 units) reaches them, as in the system test
+ * where lighting sat on top of the smart-home devices.
  */
 function clusterPackage(cx = 180, cy = 220): StoredHomePackage {
   const pkg = structuredClone(homeResponse().package as StoredHomePackage);
@@ -884,7 +952,7 @@ function clusterPackage(cx = 180, cy = 220): StoredHomePackage {
   sh!.scene.items.push({ ...sw1, elementId: 'sw2', x: cx + 30, label: { ...sw1.label!, text: 'Hall switch', x: cx + 30 } });
   sh!.elements.push({ ...sh!.elements.find((e) => e.id === 'sw1')!, id: 'sw2', label: 'Hall switch' });
   const dl1 = lt!.scene.items.find((i) => i.elementId === 'dl1')!;
-  Object.assign(dl1, { x: cx + 10, y: cy + 6 });
+  Object.assign(dl1, { x: cx + 5, y: cy + 3 });
   const led1 = lt!.scene.items.find((i) => i.elementId === 'led1') as ScenePath;
   led1.points = [{ x: cx - 80, y: cy + 20 }, { x: cx + 80, y: cy + 20 }];
   led1.d = `M${cx - 80} ${cy + 20} L${cx + 80} ${cy + 20}`;
@@ -921,6 +989,15 @@ const rowNamed = (view: HTMLElement, name: string): HTMLButtonElement => {
   if (!row) throw new Error(`No picker row "${name}"`);
   return row;
 };
+/**
+ * Taps the cluster's downlight and LED strip where neither is drawn (the point is 11 units from the
+ * downlight's centre, past its 10-unit drawing, and 6 from the strip, past its 3-unit stroke) but
+ * both touch circles reach: a choice, not a direct tap.
+ */
+function tapBetweenLights(view: MaxsenFloorplanView): void {
+  const at = planPoint(view, 185, 234);
+  tap(stageOf(view), at.x, at.y);
+}
 const key = (target: EventTarget, k: string) =>
   target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, composed: true, cancelable: true }));
 
@@ -943,22 +1020,39 @@ describe('overlapping devices (the picker)', () => {
     expect(call).not.toHaveBeenCalled();
   });
 
-  it('B3: whichever of the three is tapped at its centre, it heads the list, and nothing acts until one is chosen', async () => {
+  it('B3: the switch and the downlight drawn over each other head the list at their own centres, and nothing acts until one is chosen', async () => {
     const hass = clusterHass();
     const call = vi.spyOn(hass, 'callService');
     const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
-    const first = { sw1: 'Entrance switch', dl1: 'Luna Downlight', led1: 'Lumi Cove Strip' };
+    const first = { sw1: 'Entrance switch', dl1: 'Luna Downlight' };
 
     for (const [id, name] of Object.entries(first)) {
       tapElement(view, id);
       await settle(view);
       expect(pickRows(view)[0]?.querySelector('.pick-name')?.textContent, id).toBe(name);
+      // Both drawn markers hold the point, so they come first; the strip's touch circle reaches it too.
+      expect(pickRows(view).slice(0, 2).map((r) => r.querySelector('.pick-name')?.textContent).sort(), id).toEqual([
+        'Entrance switch',
+        'Luna Downlight',
+      ]);
       expect(pickRows(view).length, id).toBeGreaterThanOrEqual(3);
       key(window, 'Escape');
       await settle(view);
       expect(picker(view)).toBeNull();
     }
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it('N2: the middle of the LED strip, where only its own stroke is drawn, acts on the strip directly', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'led1');
+    await settle(view);
+
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['light.strip'] });
   });
 
   it('choosing a row acts on that device only, as a tap would, and closes the picker', async () => {
@@ -1106,9 +1200,9 @@ describe('overlapping devices (the picker)', () => {
 
     buttonLabelled(view, 'Lighting').click();
     await settle(view);
-    tapElement(view, 'dl1');
+    tapBetweenLights(view);
     await settle(view);
-    expect(rowTexts(view).map((r) => r[0])).toEqual(['Luna Downlight', 'Lumi Cove Strip']);
+    expect(rowTexts(view).map((r) => r[0]).sort()).toEqual(['Lumi Cove Strip', 'Luna Downlight']);
   });
 
   it('opens the picker on a hold of a cluster, and choosing a row opens more-info, not a toggle', async () => {
@@ -1210,7 +1304,7 @@ describe('overlapping devices (the picker)', () => {
     const seen: unknown[] = [];
     view.addEventListener('hass-more-info', (e) => seen.push(e));
 
-    // The downlight 12 units away and the LED strip under it are not linked; they do nothing.
+    // The downlight drawn over the switch and the LED strip under it are not linked; they do nothing.
     tapElement(view, 'sw1');
     await settle(view);
 
@@ -1379,7 +1473,7 @@ describe('overlapping devices (the picker)', () => {
     buttonLabelled(view, 'Lighting').click();
     await settle(view);
 
-    tapElement(view, 'dl1');
+    tapBetweenLights(view);
     await settle(view);
     expect(picker(view)).not.toBeNull();
     buttonLabelled(view, 'Smart Home').click();
@@ -1388,7 +1482,7 @@ describe('overlapping devices (the picker)', () => {
 
     buttonLabelled(view, 'Lighting').click();
     await settle(view);
-    tapElement(view, 'dl1');
+    tapBetweenLights(view);
     await settle(view);
     expect(picker(view)).not.toBeNull();
     buttonLabelled(view, 'Level 2').click();
@@ -1397,7 +1491,7 @@ describe('overlapping devices (the picker)', () => {
 
     buttonLabelled(view, 'Level 1').click();
     await settle(view);
-    tapElement(view, 'dl1');
+    tapBetweenLights(view);
     await settle(view);
     expect(picker(view)).not.toBeNull();
     view.remove();
@@ -1491,12 +1585,18 @@ describe('overlapping devices (the picker)', () => {
     }
   });
 
-  it('zooming in separates devices that overlap at 1x: each is tapped at its own centre with no picker', async () => {
+  it('zooming in separates devices whose touch circles overlap at 1x: each is tapped at its own centre with no picker', async () => {
     const hass = clusterHass();
     const call = vi.spyOn(hass, 'callService');
-    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
-    // At 1x the switch and the downlight 12 units from it share their touch areas.
-    tapElement(view, 'sw1');
+    // The downlight 12 units from the switch: drawn apart (neither drawing holds the other's centre),
+    // but 22 px touch circles that reach each other at 1x.
+    const pkg = clusterPackage();
+    const dl1 = pkg.levels[0]!.plans[1]!.scene.items.find((i) => i.elementId === 'dl1')!;
+    Object.assign(dl1, { x: 190, y: 226 });
+    const view = await mountView({ hass, home: homeResponse({ package: pkg, links: CLUSTER_LINKS }) });
+    // At 1x a tap 13 units to the side of both, past both drawings, is a choice.
+    const beside = planPoint(view, 178.8, 233.3);
+    tap(stageOf(view), beside.x, beside.y);
     await settle(view);
     expect(pickRows(view).length).toBeGreaterThanOrEqual(2);
     key(window, 'Escape');

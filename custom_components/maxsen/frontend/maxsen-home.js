@@ -1007,12 +1007,15 @@ function Ct(e, t, n = !1) {
 	return i;
 }
 function wt(e, t) {
-	let n = /* @__PURE__ */ new Map();
-	for (let r of t) {
-		let t = "points" in r ? Ct(e, r.points, r.closed) : "w" in r ? xt(e, r) : Math.hypot(e.x - r.x, e.y - r.y);
-		t > r.hitRadius || n.set(r.elementId, Math.min(t, n.get(r.elementId) ?? Infinity));
+	let n = /* @__PURE__ */ new Map(), r = /* @__PURE__ */ new Map();
+	for (let i of t) {
+		let t = "points" in i ? Ct(e, i.points, i.closed) : "w" in i ? xt(e, i) : Math.hypot(e.x - i.x, e.y - i.y);
+		t > i.hitRadius || (n.set(i.elementId, Math.min(t, n.get(i.elementId) ?? Infinity)), !("w" in i) && i.glyphRadius !== void 0 && t <= i.glyphRadius && r.set(i.elementId, Math.min(t, r.get(i.elementId) ?? Infinity)));
 	}
-	return [...n].sort((e, t) => e[1] - t[1]).map(([e]) => e);
+	let i = (e, t) => e[1] - t[1], a = [...r].sort(i).map(([e]) => e);
+	if (a.length === 1) return a;
+	let o = [...n].filter(([e]) => !r.has(e)).sort(i);
+	return [...a, ...o.map(([e]) => e)];
 }
 // src/operate.ts
 var Tt = /* @__PURE__ */ new Set([
@@ -1374,7 +1377,8 @@ var dn = class extends U {
 				elementId: e.elementId,
 				x: s(e.x),
 				y: c(e.y),
-				hitRadius: Math.max(Wt, e.size / 2 * r * o.s)
+				hitRadius: Math.max(Wt, e.size / 2 * r * o.s),
+				glyphRadius: e.size / 2 * r * o.s
 			} : {
 				elementId: e.elementId,
 				points: e.points.map((e) => ({
@@ -1382,7 +1386,8 @@ var dn = class extends U {
 					y: c(e.y)
 				})),
 				closed: e.closed,
-				hitRadius: Math.max(Wt, e.strokeWidth / 2 * r * o.s)
+				hitRadius: Math.max(Wt, e.strokeWidth / 2 * r * o.s),
+				glyphRadius: e.strokeWidth / 2 * r * o.s
 			});
 		}
 		return d.reverse();

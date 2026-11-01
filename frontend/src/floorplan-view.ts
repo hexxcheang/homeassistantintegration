@@ -404,7 +404,9 @@ export class MaxsenFloorplanView extends LitElement {
    * The touch areas of what is shown, in stage px: a circle round a marker and a stroke along a
    * line, each at least 22 px out from the item and never smaller than the item is drawn (so a
    * large, zoomed-in marker can be tapped over its whole size), and a box for each reading pill
-   * and text label beside it, which belong to the same element. Topmost first, so that of two at
+   * and text label beside it, which belong to the same element. Each marker and line also carries
+   * how big it is drawn, so that a point inside what a device is drawn as is that device's before
+   * any pill, label or touch circle of another (`elementsAt`). Topmost first, so that of two at
    * the same distance the one drawn on top is listed first. Only the shown layers are here, and
    * notes and unknown elements are not touchable. In use mode neither are elements with no
    * working link, which a tap and a hold do nothing for (the installer tools in link mode take
@@ -448,12 +450,14 @@ export class MaxsenFloorplanView extends LitElement {
                 x: px(item.x),
                 y: py(item.y),
                 hitRadius: Math.max(HIT_RADIUS_PX, (item.size / 2) * fit * v.s),
+                glyphRadius: (item.size / 2) * fit * v.s,
               }
             : {
                 elementId: item.elementId,
                 points: item.points.map((pt) => ({ x: px(pt.x), y: py(pt.y) })),
                 closed: item.closed,
                 hitRadius: Math.max(HIT_RADIUS_PX, (item.strokeWidth / 2) * fit * v.s),
+                glyphRadius: (item.strokeWidth / 2) * fit * v.s,
               },
         );
       }

@@ -124,6 +124,67 @@ describe('toolbar', () => {
   });
 });
 
+describe('original background switch', () => {
+  const sw = (el: Element) => q<HTMLButtonElement>(el, '.original-background');
+
+  it('is a labelled switch, off while the background is soft', async () => {
+    const { el } = await mount(homeResponse({ installer_mode: true, display: { background: 'soft' } }));
+    expect(text(sw(el))).toBe('Original background');
+    expect(sw(el).getAttribute('role')).toBe('switch');
+    expect(sw(el).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('is on while the background is original', async () => {
+    const { el } = await mount(homeResponse({ installer_mode: true, display: { background: 'original' } }));
+    expect(sw(el).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('turns the original background on by calling setDisplay', async () => {
+    const { el, callWS } = await mount(homeResponse({ installer_mode: true }), () => ({
+      display: { background: 'original' },
+    }));
+    click(sw(el));
+    await settle(el);
+    expect(callWS).toHaveBeenCalledWith({ type: 'maxsen/display/set', entry_id: 'e1', background: 'original' });
+  });
+
+  it('turns it off again by asking for the soft background', async () => {
+    const { el, callWS } = await mount(
+      homeResponse({ installer_mode: true, display: { background: 'original' } }),
+      () => ({ display: { background: 'soft' } }),
+    );
+    click(sw(el));
+    await settle(el);
+    expect(callWS).toHaveBeenCalledWith({ type: 'maxsen/display/set', entry_id: 'e1', background: 'soft' });
+  });
+
+  it('shows the server message when it is refused, and can be pressed again', async () => {
+    const { el, callWS } = await mount(homeResponse({ installer_mode: true }), () => {
+      throw { code: 'not_allowed', message: 'Changing the display needs an administrator and installer mode' };
+    });
+    click(sw(el));
+    await settle(el);
+    expect(text(q(el, '.notice.error'))).toBe('Changing the display needs an administrator and installer mode');
+    expect(sw(el).getAttribute('aria-checked')).toBe('false');
+    expect(sw(el).disabled).toBe(false);
+    click(sw(el));
+    expect(callWS).toHaveBeenCalledTimes(2);
+  });
+
+  it('cannot be pressed twice while it works', async () => {
+    let finish: (v: unknown) => void = () => undefined;
+    const { el, callWS } = await mount(homeResponse({ installer_mode: true }), () => new Promise((r) => (finish = r)));
+    click(sw(el));
+    await settle(el);
+    expect(sw(el).disabled).toBe(true);
+    click(sw(el));
+    expect(callWS).toHaveBeenCalledTimes(1);
+    finish({ display: { background: 'original' } });
+    await settle(el);
+    expect(sw(el).disabled).toBe(false);
+  });
+});
+
 describe('selecting', () => {
   it('asks for a tap when nothing is selected', async () => {
     const { el } = await mount();

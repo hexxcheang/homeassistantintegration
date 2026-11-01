@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '../src/floorplan-view.ts';
 import type { HomePackage, HomeResponse, Link } from '../src/types.ts';
+import { contentBox } from '../src/view-geometry.ts';
 import { home, makeHass } from './helpers.ts';
 import { group, homeResponse, mountView, pointer, root, settle, tap, wheel } from './view-helpers.ts';
 
@@ -47,8 +48,25 @@ function withImages(hass = hassWithDevices()) {
   return hass;
 }
 
+const viewBoxOf = (view: HTMLElement): string | null => root(view).querySelector('svg')?.getAttribute('viewBox') ?? null;
+const boxString = (b: { x: number; y: number; w: number; h: number }): string => `${b.x} ${b.y} ${b.w} ${b.h}`;
+const ids = (view: HTMLElement): (string | null)[] =>
+  [...root(view).querySelectorAll('g[data-element-id]')].map((g) => g.getAttribute('data-element-id'));
+const buttonsOf = (view: HTMLElement, selector: string) => [...root(view).querySelectorAll<HTMLButtonElement>(selector)];
+const buttonLabelled = (view: HTMLElement, label: string): HTMLButtonElement => {
+  const found = buttonsOf(view, 'button').find((b) => b.textContent?.trim() === label);
+  if (!found) throw new Error(`No button "${label}"`);
+  return found;
+};
+/** The fitted box of what a level draws, from the fixture's own scenes. */
+function fittedBox(levelIndex: number, types?: string[]) {
+  const level = home.levels[levelIndex]!;
+  const plans = level.plans.filter((p) => !types || types.includes(p.type));
+  return contentBox(plans.flatMap((p) => p.scene.items), plans[0]!.width, plans[0]!.height);
+}
+
 describe('drawing', () => {
-  it('draws one group per scene item over one background, with the viewBox of the plan', async () => {
+  it('draws one group per scene item over one background, fitted to the items', async () => {
     const view = await mountView({ hass: withImages(), home: homeResponse() });
 
     const ids = [...root(view).querySelectorAll('g[data-element-id]')].map((g) =>
@@ -56,7 +74,7 @@ describe('drawing', () => {
     );
     // Level 1 draws the smart-home and the lighting scene together.
     expect(ids).toEqual(['sw1', 'sen1', 'cur1', 'note1', 'dl1', 'dl2', 'dl3', 'led1']);
-    expect(root(view).querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 1000 1000');
+    expect(viewBoxOf(view)).toBe(boxString(fittedBox(0)));
     expect(root(view).querySelectorAll('image')).toHaveLength(1);
     expect(root(view).querySelector('image')?.getAttribute('href')).toMatch(/^blob:image-/);
   });
@@ -98,8 +116,10 @@ describe('drawing', () => {
   it('makes every marker at least 44 CSS px to hit', async () => {
     const view = await mountView({ hass: withImages(), home: homeResponse() });
     const hit = group(view, 'dl1').querySelector('circle.hit');
-    // The stage is 600 px high in tests, so 1000 plan units are 600 px.
-    expect(Number(hit?.getAttribute('r')) * 0.6).toBeGreaterThanOrEqual(22);
+    // The stage is 800 x 600 px in tests; the fitted box sets how many px a plan unit is.
+    const box = fittedBox(0);
+    const pxPerUnit = Math.min(800 / box.w, 600 / box.h);
+    expect(Number(hit?.getAttribute('r')) * pxPerUnit).toBeGreaterThanOrEqual(22 - 0.01);
   });
 
   it('gives lines (strips, curtains) a hit twin at least 44 CSS px wide', async () => {
@@ -108,8 +128,9 @@ describe('drawing', () => {
       const twin = group(view, id).querySelector('path.hit');
       expect(twin, id).not.toBeNull();
       expect(twin?.getAttribute('fill')).toBe('none');
-      // 600 px stage for 1000 plan units: 0.6 px per unit.
-      expect(Number(twin?.getAttribute('stroke-width')) * 0.6).toBeGreaterThanOrEqual(44 - 0.01);
+      const box = fittedBox(0);
+      const pxPerUnit = Math.min(800 / box.w, 600 / box.h);
+      expect(Number(twin?.getAttribute('stroke-width')) * pxPerUnit).toBeGreaterThanOrEqual(44 - 0.01);
     }
   });
 
@@ -153,21 +174,72 @@ describe('levels and plan types', () => {
 
     tabs[1]?.click();
     await settle(view);
-    expect([...root(view).querySelectorAll('g[data-element-id]')].map((g) => g.getAttribute('data-element-id'))).toEqual(['sen2']);
-    expect(root(view).querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 1000 750');
+    expect(ids(view)).toEqual(['sen2']);
+    expect(viewBoxOf(view)).toBe(boxString(fittedBox(1)));
   });
 
-  it('has no toggle when a level draws the same background twice', async () => {
+  it('offers All, Smart Home and Lighting when a level draws one background twice, starting on All', async () => {
     const view = await mountView({ hass: withImages(), home: homeResponse() });
+    const buttons = buttonsOf(view, '.plan-toggle button');
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual(['All', 'Smart Home', 'Lighting']);
+    expect(buttons.map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false']);
+    expect(ids(view)).toEqual(['sw1', 'sen1', 'cur1', 'note1', 'dl1', 'dl2', 'dl3', 'led1']);
+  });
+
+  it('has no layer control on a level with one plan', async () => {
+    const view = await mountView({ hass: withImages(), home: homeResponse() });
+    buttonLabelled(view, 'Level 2').click();
+    await settle(view);
     expect(root(view).querySelector('.plan-toggle')).toBeNull();
   });
 
-  it('has a Smart Home | Lighting toggle when the backgrounds differ', async () => {
+  it('draws only the chosen layer, and the other layer cannot be tapped', async () => {
+    const view = await mountView({
+      hass: withImages(),
+      home: homeResponse({ links: { dl1: LIGHT }, installer_mode: true }),
+      mode: 'link',
+    });
+    const taps: string[] = [];
+    view.addEventListener('maxsen-element-tap', (e) => taps.push((e as CustomEvent).detail.elementId));
+
+    buttonLabelled(view, 'Smart Home').click();
+    await settle(view);
+    expect(ids(view)).toEqual(['sw1', 'sen1', 'cur1', 'note1']);
+    expect(root(view).querySelector('g[data-element-id="dl1"]')).toBeNull();
+    expect(root(view).querySelector('g[data-element-id="led1"]')).toBeNull();
+    // Hit areas of the hidden layer are gone too: nothing in the DOM answers to its ids.
+    expect(root(view).querySelectorAll('[data-element-id="dl1"], [data-element-id="dl2"], [data-element-id="dl3"]')).toHaveLength(0);
+
+    buttonLabelled(view, 'Lighting').click();
+    await settle(view);
+    expect(ids(view)).toEqual(['dl1', 'dl2', 'dl3', 'led1']);
+    expect(buttonLabelled(view, 'Lighting').getAttribute('aria-pressed')).toBe('true');
+
+    tap(group(view, 'dl2').querySelector('.hit')!);
+    expect(taps).toEqual(['dl2']);
+
+    buttonLabelled(view, 'All').click();
+    await settle(view);
+    expect(ids(view)).toHaveLength(8);
+  });
+
+  it('fits the view to the chosen layer', async () => {
+    const view = await mountView({ hass: withImages(), home: homeResponse() });
+    buttonLabelled(view, 'Smart Home').click();
+    await settle(view);
+    expect(viewBoxOf(view)).toBe(boxString(fittedBox(0, ['smart-home'])));
+    buttonLabelled(view, 'Lighting').click();
+    await settle(view);
+    expect(viewBoxOf(view)).toBe(boxString(fittedBox(0, ['lighting'])));
+    expect(fittedBox(0, ['smart-home'])).not.toEqual(fittedBox(0, ['lighting']));
+  });
+
+  it('has only Smart Home | Lighting when the backgrounds differ', async () => {
     const different = structuredClone(homeResponse());
     different.package!.levels[0]!.plans[1]!.background.key = 'page-1|90|0,0,1,1';
     const view = await mountView({ hass: withImages(), home: different });
 
-    const buttons = [...root(view).querySelectorAll<HTMLButtonElement>('.plan-toggle button')];
+    const buttons = buttonsOf(view, '.plan-toggle button');
     expect(buttons.map((b) => b.textContent?.trim())).toEqual(['Smart Home', 'Lighting']);
     // Smart Home first: only its elements are drawn.
     expect(group(view, 'sw1')).toBeTruthy();
@@ -177,6 +249,80 @@ describe('levels and plan types', () => {
     await settle(view);
     expect(group(view, 'dl1')).toBeTruthy();
     expect(root(view).querySelector('g[data-element-id="sw1"]')).toBeNull();
+  });
+});
+
+describe('background', () => {
+  it('softens the background image when the display setting is soft', async () => {
+    const view = await mountView({ hass: withImages(), home: homeResponse({ display: { background: 'soft' } }) });
+    expect(root(view).querySelector('image')?.classList.contains('soft')).toBe(true);
+  });
+
+  it('shows the background as drawn when the display setting is original', async () => {
+    const view = await mountView({ hass: withImages(), home: homeResponse({ display: { background: 'original' } }) });
+    expect(root(view).querySelector('image')).not.toBeNull();
+    expect(root(view).querySelector('image')?.classList.contains('soft')).toBe(false);
+  });
+});
+
+describe('fitted view', () => {
+  it('switches to the whole drawing and back with one button', async () => {
+    const view = await mountView({ hass: withImages(), home: homeResponse() });
+    expect(viewBoxOf(view)).not.toBe('0 0 1000 1000');
+
+    buttonLabelled(view, 'Whole drawing').click();
+    await settle(view);
+    expect(viewBoxOf(view)).toBe('0 0 1000 1000');
+
+    buttonLabelled(view, 'Fit to rooms').click();
+    await settle(view);
+    expect(viewBoxOf(view)).toBe(boxString(fittedBox(0)));
+    expect(buttonLabelled(view, 'Whole drawing')).toBeTruthy();
+  });
+
+  it('starts each level on its own fitted box', async () => {
+    const view = await mountView({ hass: withImages(), home: homeResponse() });
+    buttonLabelled(view, 'Whole drawing').click();
+    await settle(view);
+    buttonLabelled(view, 'Level 2').click();
+    await settle(view);
+    expect(viewBoxOf(view)).toBe(boxString(fittedBox(1)));
+  });
+
+  it('returns to the fitted box on a double tap, also from the whole drawing', async () => {
+    const view = await mountView({ hass: withImages(), home: homeResponse() });
+    buttonLabelled(view, 'Whole drawing').click();
+    await settle(view);
+    expect(viewBoxOf(view)).toBe('0 0 1000 1000');
+
+    const stage = root(view).querySelector<HTMLElement>('.stage')!;
+    tap(stage, 50, 50);
+    tap(stage, 52, 51);
+    await settle(view);
+    expect(viewBoxOf(view)).toBe(boxString(fittedBox(0)));
+    expect(root(view).querySelector<HTMLElement>('.canvas')!.style.transform).toBe('translate(0px, 0px) scale(1)');
+  });
+
+  it('shows the whole drawing, never an empty box, for a level with nothing placed', async () => {
+    const empty = structuredClone(homeResponse());
+    for (const plan of empty.package!.levels[0]!.plans) {
+      plan.scene.items = [];
+      plan.elements = [];
+    }
+    const view = await mountView({ hass: withImages(), home: empty });
+    expect(viewBoxOf(view)).toBe('0 0 1000 1000');
+    // Nothing to fit, so no button to press.
+    expect(buttonsOf(view, 'button').some((b) => b.textContent?.trim() === 'Whole drawing')).toBe(false);
+  });
+
+  it('keeps the 1x-6x zoom limits relative to the fitted box', async () => {
+    const view = await mountView({ hass: withImages(), home: homeResponse() });
+    const stage = root(view).querySelector<HTMLElement>('.stage')!;
+    wheel(stage, -100000);
+    expect(root(view).querySelector<HTMLElement>('.canvas')!.style.transform).toMatch(/scale\(6\)/);
+    wheel(stage, 100000);
+    expect(root(view).querySelector<HTMLElement>('.canvas')!.style.transform).toMatch(/scale\(1\)/);
+    expect(viewBoxOf(view)).toBe(boxString(fittedBox(0)));
   });
 });
 

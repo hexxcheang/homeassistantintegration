@@ -15,6 +15,7 @@ import type {
   Link,
   SceneItem,
 } from './types.ts';
+import { contentBox, layerOptions, type Box, type Layer } from './view-geometry.ts';
 import { visualState, type VisualState } from './visual-state.ts';
 
 export type ViewMode = 'use' | 'link';
@@ -36,6 +37,8 @@ const FALLBACK_STAGE = { w: 800, h: 600 };
 const GLOWING = new Set<string>([...LIGHTING_CATEGORIES, 'smart-switches']);
 /** The categories whose reading is shown as a pill beside the element. */
 const PILLED = new Set<string>(['sensors', 'aircon-controllers', 'curtains-blinds', 'smart-locks']);
+
+const LAYER_LABELS: Record<Layer, string> = { all: 'All', 'smart-home': 'Smart Home', lighting: 'Lighting' };
 
 const IDENTITY = 'translate(0px, 0px) scale(1)';
 
@@ -79,7 +82,8 @@ export class MaxsenFloorplanView extends LitElement {
     mode: { type: String },
     selected: { attribute: false },
     _levelId: { state: true },
-    _planType: { state: true },
+    _layer: { state: true },
+    _whole: { state: true },
     _images: { state: true },
     _stage: { state: true },
     _popup: { state: true },
@@ -92,7 +96,10 @@ export class MaxsenFloorplanView extends LitElement {
   /** Element ids to outline in link mode. */
   declare selected: readonly string[];
   declare private _levelId: string | undefined;
-  declare private _planType: HomePlan['type'];
+  /** The layer picked on the toggle; a level that cannot show it falls back to its first option. */
+  declare private _layer: Layer;
+  /** Showing the whole drawing instead of the fitted box. */
+  declare private _whole: boolean;
   /** Image id to object URL. */
   declare private _images: ReadonlyMap<string, string>;
   declare private _stage: { w: number; h: number };
@@ -119,7 +126,8 @@ export class MaxsenFloorplanView extends LitElement {
     super();
     this.mode = 'use';
     this.selected = [];
-    this._planType = 'smart-home';
+    this._layer = 'all';
+    this._whole = false;
     this._images = new Map();
     this._stage = FALLBACK_STAGE;
   }
@@ -164,8 +172,8 @@ export class MaxsenFloorplanView extends LitElement {
   override updated(): void {
     this._observeStage();
     this._loadImages();
-    // A new level or plan is a new drawing: start it unzoomed.
-    const shown = `${this._levelId}|${this._visible().plans.map((p) => p.id).join(',')}`;
+    // A new level, layer or view box is a new drawing: start it unzoomed.
+    const shown = `${this._levelId}|${this._visible().plans.map((p) => p.id).join(',')}|${this._whole}`;
     if (shown !== this._shownPlans) {
       this._shownPlans = shown;
       this._resetView();
@@ -225,17 +233,28 @@ export class MaxsenFloorplanView extends LitElement {
   }
 
   /**
-   * The plans to draw for the selected level. Plans on an identical background are drawn together;
-   * plans on different backgrounds (a different crop or page) are shown one at a time.
+   * The plans to draw for the selected level, and the layers it offers. Hit testing and drawing
+   * use only these plans, so a hidden layer's devices are neither drawn nor tappable.
    */
-  private _visible(): { plans: HomePlan[]; toggle: boolean } {
+  private _visible(): { plans: HomePlan[]; options: Layer[]; layer: Layer } {
     const level = this._levels().find((l) => l.id === this._levelId);
-    const plans = level?.plans ?? [];
-    const first = plans[0];
-    if (!first || plans.every((p) => p.background.key === first.background.key)) {
-      return { plans, toggle: false };
-    }
-    return { plans: [plans.find((p) => p.type === this._planType) ?? first], toggle: true };
+    const all = level?.plans ?? [];
+    const options = layerOptions(all);
+    if (options.length === 0) return { plans: all, options, layer: 'all' };
+    const layer = options.includes(this._layer) ? this._layer : (options[0] as Layer);
+    return { plans: layer === 'all' ? all : all.filter((p) => p.type === layer), options, layer };
+  }
+
+  /** The area of the drawing in view at 1x: the items of what is shown, or the whole drawing. */
+  private _boxes(plans: HomePlan[]): { fitted: Box; whole: Box; shown: Box } {
+    const first = plans[0] as HomePlan;
+    const whole = { x: 0, y: 0, w: first.width, h: first.height };
+    const fitted = contentBox(
+      plans.flatMap((p) => p.scene.items),
+      first.width,
+      first.height,
+    );
+    return { fitted, whole, shown: this._whole ? whole : fitted };
   }
 
   private _state(elementId: string): VisualState {
@@ -385,6 +404,7 @@ export class MaxsenFloorplanView extends LitElement {
       const last = this._lastTap;
       if (last && now - last.t < DOUBLE_TAP_MS && Math.hypot(press.x - last.x, press.y - last.y) < DOUBLE_TAP_DISTANCE) {
         this._lastTap = undefined;
+        this._whole = false;
         this._resetView();
       } else {
         this._lastTap = { t: now, x: press.x, y: press.y };
@@ -585,13 +605,14 @@ export class MaxsenFloorplanView extends LitElement {
     </g>`;
   }
 
-  private _renderDrawing(plans: HomePlan[]): TemplateResult {
+  private _renderDrawing(plans: HomePlan[], box: Box): TemplateResult {
     const first = plans[0] as HomePlan;
     const image = this._images.get(first.background.imageId);
-    const fit = Math.min(this._stage.w / first.width, this._stage.h / first.height);
+    const fit = Math.min(this._stage.w / box.w, this._stage.h / box.h);
     const hitRadius = HIT_RADIUS_PX / fit;
+    const soft = this.home?.display?.background !== 'original';
     return html`
-      <svg viewBox="0 0 ${first.width} ${first.height}" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="${box.x} ${box.y} ${box.w} ${box.h}" preserveAspectRatio="xMidYMid meet">
         <defs>
           <filter id="maxsen-glow" x="-300%" y="-300%" width="700%" height="700%" color-interpolation-filters="sRGB">
             <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ffb22e" flood-opacity="0.95" result="near" />
@@ -604,7 +625,15 @@ export class MaxsenFloorplanView extends LitElement {
           </filter>
         </defs>
         <rect width=${first.width} height=${first.height} fill="#fff" />
-        ${image ? svg`<image href=${image} width=${first.width} height=${first.height} preserveAspectRatio="none" />` : nothing}
+        ${image
+          ? svg`<image
+              class=${classMap({ background: true, soft })}
+              href=${image}
+              width=${first.width}
+              height=${first.height}
+              preserveAspectRatio="none"
+            />`
+          : nothing}
         ${plans.map((plan) => {
           const nodes = sceneNodes(plan);
           return svg`<g class="plan">${plan.scene.items.map((item, i) =>
@@ -655,7 +684,10 @@ export class MaxsenFloorplanView extends LitElement {
       return html`<div class="empty">No home loaded yet. An installer adds it from the Maxsen Planner.</div>`;
     }
     const levels = this._levels();
-    const { plans, toggle } = this._visible();
+    const { plans, options, layer } = this._visible();
+    const boxes = plans.length > 0 ? this._boxes(plans) : undefined;
+    // With nothing placed the fitted box is the whole drawing: there is nothing to switch between.
+    const canFit = boxes !== undefined && (boxes.fitted.w < boxes.whole.w || boxes.fitted.h < boxes.whole.h);
     return html`
       <div class="bar">
         <div class="tabs" role="tablist">
@@ -664,21 +696,31 @@ export class MaxsenFloorplanView extends LitElement {
               role="tab"
               aria-selected=${l.id === this._levelId ? 'true' : 'false'}
               class=${classMap({ active: l.id === this._levelId })}
-              @click=${() => (this._levelId = l.id)}
+              @click=${() => {
+                this._levelId = l.id;
+                this._whole = false;
+              }}
             >${l.name}</button>`,
           )}
         </div>
-        ${toggle
-          ? html`<div class="plan-toggle" role="group">
-              ${(['smart-home', 'lighting'] as const).map(
-                (type) => html`<button
-                  class=${classMap({ active: plans[0]?.type === type })}
-                  aria-pressed=${plans[0]?.type === type ? 'true' : 'false'}
-                  @click=${() => (this._planType = type)}
-                >${type === 'smart-home' ? 'Smart Home' : 'Lighting'}</button>`,
-              )}
-            </div>`
-          : nothing}
+        <div class="controls">
+          ${options.length > 0
+            ? html`<div class="plan-toggle" role="group" aria-label="Layer">
+                ${options.map(
+                  (option) => html`<button
+                    class=${classMap({ active: layer === option })}
+                    aria-pressed=${layer === option ? 'true' : 'false'}
+                    @click=${() => (this._layer = option)}
+                  >${LAYER_LABELS[option]}</button>`,
+                )}
+              </div>`
+            : nothing}
+          ${canFit
+            ? html`<button class="fit" @click=${() => (this._whole = !this._whole)}>
+                ${this._whole ? 'Fit to rooms' : 'Whole drawing'}
+              </button>`
+            : nothing}
+        </div>
       </div>
       <div
         class="stage"
@@ -690,7 +732,7 @@ export class MaxsenFloorplanView extends LitElement {
         @contextmenu=${(e: Event) => e.preventDefault()}
       >
         <div class="canvas" style=${`transform: ${IDENTITY}`}>
-          ${plans.length > 0 ? this._renderDrawing(plans) : html`<div class="empty">This level has no plan.</div>`}
+          ${boxes ? this._renderDrawing(plans, boxes.shown) : html`<div class="empty">This level has no plan.</div>`}
         </div>
       </div>
       ${this._renderPopup()}
@@ -734,6 +776,12 @@ export class MaxsenFloorplanView extends LitElement {
       gap: 6px;
       overflow-x: auto;
     }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
     .plan-toggle {
       padding: 3px;
       border-radius: 24px;
@@ -756,6 +804,9 @@ export class MaxsenFloorplanView extends LitElement {
       color: var(--text-primary-color, #fff);
       font-weight: 600;
     }
+    .bar button.fit {
+      border: 1px solid var(--divider-color, #cfd3d9);
+    }
     .stage {
       position: relative;
       flex: 1 1 auto;
@@ -776,6 +827,11 @@ export class MaxsenFloorplanView extends LitElement {
       display: block;
       width: 100%;
       height: 100%;
+    }
+    /* The plan's own drawing is the point: fade the background so the markers stand out. */
+    image.soft {
+      filter: grayscale(1) contrast(0.55) brightness(1.25);
+      opacity: 0.6;
     }
     .element {
       cursor: pointer;

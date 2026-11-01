@@ -4,6 +4,7 @@ import {
   createStarterScenes,
   refreshApply,
   refreshPreview,
+  setDisplay,
   setLinks,
   uploadHomeFile,
 } from './api.ts';
@@ -162,6 +163,24 @@ export class MaxsenLinkMode extends LitElement {
       this._select([]);
     } catch (err) {
       this._say(errorMessage(err, 'Could not save the link. Try again.'), true);
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  // ---- background ----
+
+  /** The background is the same on every screen, so this saves it on the server. */
+  private async _toggleOriginal(): Promise<void> {
+    const { hass, entryId } = this;
+    if (!hass || !entryId || this._busy) return;
+    const next = this.home?.display?.background === 'original' ? 'soft' : 'original';
+    this._busy = true;
+    try {
+      await setDisplay(hass, entryId, next);
+      this._say(next === 'original' ? 'Showing the original background.' : 'Showing the soft background.', false);
+    } catch (err) {
+      this._say(errorMessage(err, 'Could not change the background. Try again.'), true);
     } finally {
       this._busy = false;
     }
@@ -420,6 +439,7 @@ export class MaxsenLinkMode extends LitElement {
     // A home from a file is refreshed from a newer file. A paired home is refreshed from the
     // planner, or from a file when the planner cannot be used (no internet, connection revoked).
     const fromFile = this.home?.source === 'file';
+    const original = this.home?.display?.background === 'original';
     return html`
       <div class="toolbar">
         <button class="done primary" @click=${this._done}>Done</button>
@@ -434,6 +454,16 @@ export class MaxsenLinkMode extends LitElement {
           : html`<button class="refresh" @click=${() => void this._preview()}>Refresh from planner</button>`}
         <button class="choose-file" @click=${() => this.renderRoot.querySelector<HTMLInputElement>('input[type="file"]')?.click()}>
           ${fromFile ? 'Choose a newer home file' : 'Use a home file instead'}
+        </button>
+        <button
+          class="original-background"
+          role="switch"
+          aria-checked=${original ? 'true' : 'false'}
+          ?disabled=${this._busy}
+          @click=${() => void this._toggleOriginal()}
+        >
+          <span class="track"><span class="knob"></span></span>
+          <span>Original background</span>
         </button>
         <input type="file" accept=".json,application/json" hidden @change=${(e: Event) => void this._chooseFile(e)} />
       </div>
@@ -487,6 +517,39 @@ export class MaxsenLinkMode extends LitElement {
       border-color: var(--primary-color, #2f6fed);
       background: color-mix(in srgb, var(--primary-color, #2f6fed) 16%, transparent);
       font-weight: 600;
+    }
+    .toolbar button.original-background {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 12px;
+      text-align: left;
+    }
+    .original-background .track {
+      position: relative;
+      flex: none;
+      width: 44px;
+      height: 26px;
+      border-radius: 13px;
+      background: var(--disabled-color, #c4c8ce);
+      transition: background 0.15s;
+    }
+    .original-background[aria-checked='true'] .track {
+      background: var(--primary-color, #2f6fed);
+    }
+    .original-background .knob {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.15s;
+    }
+    .original-background[aria-checked='true'] .knob {
+      transform: translateX(18px);
     }
     .primary {
       border-color: var(--primary-color, #2f6fed);

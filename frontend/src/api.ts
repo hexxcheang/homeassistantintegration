@@ -3,29 +3,46 @@ import type { HassLike, HomeResponse, Link, QuickItem, RefreshSummary } from './
 /** What changed on the server; the view reloads the home on any of them. */
 export type HomeEvent = 'home' | 'links' | 'quick_panel';
 
-/** The id of the first loaded Maxsen home, or `undefined` when none is set up. */
-export async function findEntryId(hass: HassLike): Promise<string | undefined> {
+/** A Maxsen config entry and where it is in its life: `loaded` is the only state that answers `maxsen/*`. */
+export interface MaxsenEntry {
+  entryId: string;
+  state: string;
+}
+
+/**
+ * The first loaded Maxsen entry or, when none is loaded yet, the first one there is, so the caller
+ * can tell "still starting" (right after Home Assistant restarts) from "not set up". `undefined`
+ * only when there is no Maxsen entry at all.
+ */
+export async function findEntry(hass: HassLike): Promise<MaxsenEntry | undefined> {
   const entries = await hass.callWS<{ entry_id: string; state: string }[]>({
     type: 'config_entries/get',
     domain: 'maxsen',
   });
-  return entries.find((e) => e.state === 'loaded')?.entry_id;
+  const entry = entries.find((e) => e.state === 'loaded') ?? entries[0];
+  return entry && { entryId: entry.entry_id, state: entry.state };
 }
 
 export function getHome(hass: HassLike, entryId: string): Promise<HomeResponse> {
   return hass.callWS<HomeResponse>({ type: 'maxsen/home', entry_id: entryId });
 }
 
-/** Calls `callback` when the home, links or quick panel change. Resolves to the unsubscribe function. */
+/**
+ * Calls `callback` when the home, links or quick panel change. Resolves to the unsubscribe function.
+ *
+ * The subscription does not resubscribe itself: after a reconnect it is gone, and the panel
+ * subscribes again once Maxsen answers. (A resubscribed copy would be a second subscription.)
+ */
 export function subscribe(
   hass: HassLike,
   entryId: string,
   callback: (event: HomeEvent) => void,
 ): Promise<() => void | Promise<void>> {
-  return hass.connection.subscribeMessage<{ event: HomeEvent }>((msg) => callback(msg.event), {
-    type: 'maxsen/subscribe',
-    entry_id: entryId,
-  });
+  return hass.connection.subscribeMessage<{ event: HomeEvent }>(
+    (msg) => callback(msg.event),
+    { type: 'maxsen/subscribe', entry_id: entryId },
+    { resubscribe: false },
+  );
 }
 
 /** Link or unlink elements; a `null` value removes that element's link. Installer mode only. */

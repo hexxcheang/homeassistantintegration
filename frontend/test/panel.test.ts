@@ -9,33 +9,82 @@ import { homeResponse, settle } from './view-helpers.ts';
 
 type Handler = (msg: { event: string }) => void;
 
+type Entry = { entry_id: string; state: string };
+
 interface Fake {
   hass: HassLike;
+  /** Send a server event to every live `maxsen/subscribe`. */
   deliver(event: string): void;
+  /** Called whenever the panel calls a subscription's unsubscribe function. */
   unsubscribe: ReturnType<typeof vi.fn<() => void>>;
   homeCalls(): number;
+  entryCalls(): number;
   subscribeCalls(): number;
   setHome(home: HomeResponse): void;
+  setEntries(entries: Entry[]): void;
   /** The websocket came back after a drop (home-assistant-js-websocket's "ready" event). */
   reconnect(): void;
   /** How many "ready" listeners are registered. */
   readyListeners(): number;
+  /** The subscriptions the server holds right now. */
+  liveSubscriptions(): number;
+  /** The ids of every `unsubscribe_events` the panel caused, and those the server did not know (`not_found`). */
+  unsubscribeIds(): number[];
+  staleUnsubscribes(): number[];
 }
 
-/** A hass whose websocket answers the Maxsen commands. */
-function fakeHass(entries = [{ entry_id: 'e1', state: 'loaded' }], first = homeResponse()): Fake {
+interface Sub {
+  callback: Handler;
+  resubscribe: boolean;
+  /** What the function the panel holds does right now: it first targets the id the subscription had when made. */
+  unsubscribe: () => Promise<void>;
+}
+
+/**
+ * A hass whose websocket answers the Maxsen commands. Its connection behaves like
+ * home-assistant-js-websocket: after a reconnect it numbers commands from 1 again and
+ * resubscribes every subscription not made with `resubscribe: false` itself, fires `ready`, and
+ * only then points the subscription's unsubscribe at the new id. Until then (and for a
+ * subscription that was not resubscribed) unsubscribing sends the old id, which the server
+ * answers with `not_found` unless it happens to belong to another subscription.
+ */
+function fakeHass(entries: Entry[] = [{ entry_id: 'e1', state: 'loaded' }], first = homeResponse()): Fake {
   const hass = makeHass();
   let home = first;
-  let handler: Handler = () => undefined;
+  let currentEntries = entries;
+  let nextId = 1;
+  const server = new Map<number, Sub>();
+  const unsubscribeIds: number[] = [];
+  const stale: number[] = [];
   const unsubscribe = vi.fn<() => void>();
   const callWS = vi.spyOn(hass, 'callWS').mockImplementation((async (msg: { type: string }) => {
-    if (msg.type === 'config_entries/get') return entries;
+    if (msg.type === 'config_entries/get') return currentEntries;
     if (msg.type === 'maxsen/home') return structuredClone(home);
     throw new Error(`unexpected ${msg.type}`);
   }) as never);
-  vi.spyOn(hass.connection, 'subscribeMessage').mockImplementation((async (cb: Handler) => {
-    handler = cb;
-    return unsubscribe;
+  const sendUnsubscribe = async (id: number): Promise<void> => {
+    unsubscribeIds.push(id);
+    if (!server.delete(id)) {
+      stale.push(id);
+      throw { code: 'not_found', message: 'Subscription not found.' };
+    }
+  };
+  vi.spyOn(hass.connection, 'subscribeMessage').mockImplementation((async (
+    callback: Handler,
+    _message: unknown,
+    options?: { resubscribe?: boolean },
+  ) => {
+    const id = nextId++;
+    const sub: Sub = {
+      callback,
+      resubscribe: options?.resubscribe !== false,
+      unsubscribe: () => sendUnsubscribe(id),
+    };
+    server.set(id, sub);
+    return () => {
+      unsubscribe();
+      return sub.unsubscribe();
+    };
   }) as never);
   vi.spyOn(hass, 'fetchWithAuth').mockImplementation(
     async () => new Response(new Blob(['png']), { status: 200 }),
@@ -49,15 +98,30 @@ function fakeHass(entries = [{ entry_id: 'e1', state: 'loaded' }], first = homeR
   };
   return {
     hass,
-    deliver: (event) => handler({ event }),
+    deliver: (event) => [...server.values()].forEach((sub) => sub.callback({ event })),
     unsubscribe,
     homeCalls: () => callWS.mock.calls.filter((c) => c[0].type === 'maxsen/home').length,
+    entryCalls: () => callWS.mock.calls.filter((c) => c[0].type === 'config_entries/get').length,
     subscribeCalls: () => vi.mocked(hass.connection.subscribeMessage).mock.calls.length,
     setHome: (h) => (home = h),
+    setEntries: (e) => (currentEntries = e),
     reconnect: () => {
+      const before = [...server.values()];
+      server.clear();
+      nextId = 1;
+      const again = before.filter((sub) => sub.resubscribe);
+      const ids = again.map((sub) => {
+        const id = nextId++;
+        server.set(id, sub);
+        return id;
+      });
       for (const listener of [...ready]) listener();
+      again.forEach((sub, i) => (sub.unsubscribe = () => sendUnsubscribe(ids[i]!)));
     },
     readyListeners: () => ready.size,
+    liveSubscriptions: () => server.size,
+    unsubscribeIds: () => [...unsubscribeIds],
+    staleUnsubscribes: () => [...stale],
   };
 }
 
@@ -113,10 +177,11 @@ describe('<maxsen-home-panel>', () => {
     expect(view.home?.package?.project.title).toBe('Test House');
     expect(view.mode).toBe('use');
     expect(view.hass).toBe(fake.hass);
-    expect(fake.hass.connection.subscribeMessage).toHaveBeenCalledWith(expect.any(Function), {
-      type: 'maxsen/subscribe',
-      entry_id: 'e1',
-    });
+    expect(fake.hass.connection.subscribeMessage).toHaveBeenCalledWith(
+      expect.any(Function),
+      { type: 'maxsen/subscribe', entry_id: 'e1' },
+      { resubscribe: false },
+    );
     // The quick panel sits in the slot beside (or under) the drawing.
     const slot = panel.shadowRoot!.querySelector('.quick-panel-slot');
     expect(slot).not.toBeNull();
@@ -156,7 +221,7 @@ describe('<maxsen-home-panel>', () => {
     expect(viewText(panel)).toContain('No home loaded yet. An installer adds it from the Maxsen Planner.');
   });
 
-  it('says so when no Maxsen home is set up', async () => {
+  it('says "not set up yet" only when no maxsen entry exists on a fresh start', async () => {
     const fake = fakeHass([]);
     const panel = await mountPanel({ hass: fake.hass });
 
@@ -213,7 +278,8 @@ describe('<maxsen-home-panel> after Home Assistant restarts', () => {
     fake.reconnect();
     await flush();
 
-    expect(fake.unsubscribe).toHaveBeenCalledTimes(1); // the old subscription is let go
+    // home-assistant-js-websocket dropped the old subscription itself; the handle is not used.
+    expect(fake.unsubscribe).not.toHaveBeenCalled();
     expect(fake.homeCalls()).toBe(2);
     expect(fake.subscribeCalls()).toBe(2);
     // The home stays on screen while it retries.
@@ -235,6 +301,107 @@ describe('<maxsen-home-panel> after Home Assistant restarts', () => {
     // Once it works it stops retrying.
     await vi.advanceTimersByTimeAsync(120_000);
     expect(fake.subscribeCalls()).toBe(3);
+  });
+
+  it('does not say "not set up yet" for an entry that is listed but still loading on a fresh start', async () => {
+    vi.useFakeTimers();
+    const fake = fakeHass([{ entry_id: 'e1', state: 'setup_in_progress' }]);
+    const panel = document.createElement('maxsen-home-panel') as MaxsenHomePanel;
+    panel.hass = fake.hass;
+    document.body.append(panel);
+    await flush();
+    expect(panel.shadowRoot!.textContent).not.toContain('not set up');
+    expect(fake.subscribeCalls()).toBe(0);
+
+    fake.setEntries([{ entry_id: 'e1', state: 'loaded' }]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flush();
+
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).not.toBeNull();
+    expect(fake.subscribeCalls()).toBe(1);
+  });
+
+  it('stays on the home and retries while the entry is still loading after a reconnect', async () => {
+    const fake = fakeHass();
+    const panel = await mountPanel({ hass: fake.hass });
+    vi.useFakeTimers();
+    // The websocket accepts clients before Maxsen has finished loading.
+    fake.setEntries([{ entry_id: 'e1', state: 'setup_in_progress' }]);
+    const seen: string[] = [];
+    const watch = (): void => void seen.push(panel.shadowRoot!.textContent ?? '');
+
+    fake.reconnect();
+    await flush();
+    watch();
+
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).not.toBeNull();
+    expect(fake.subscribeCalls()).toBe(1); // nothing to subscribe to yet
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fake.entryCalls()).toBe(2);
+    fake.setEntries([{ entry_id: 'e1', state: 'loaded' }]);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    watch();
+
+    expect(fake.entryCalls()).toBe(3);
+    expect(fake.subscribeCalls()).toBe(2);
+    expect(fake.liveSubscriptions()).toBe(1);
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).not.toBeNull();
+    for (const text of seen) {
+      expect(text).not.toContain('not set up');
+      expect(text).not.toContain('Loading');
+      expect(text).not.toContain('Could not load');
+    }
+    fake.setHome(homeResponse({ links: { dl1: { type: 'entity', id: 'light.a' } } }));
+    fake.deliver('links');
+    await flush();
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')!.home?.links).toHaveProperty('dl1');
+  });
+
+  it('leaves one subscription after three reconnects, never unsubscribing a previous connection', async () => {
+    const fake = fakeHass();
+    const panel = await mountPanel({ hass: fake.hass });
+    expect(fake.liveSubscriptions()).toBe(1);
+
+    for (let i = 0; i < 3; i++) {
+      fake.reconnect();
+      await settle(panel);
+    }
+
+    expect(fake.liveSubscriptions()).toBe(1);
+    expect(fake.subscribeCalls()).toBe(4);
+    for (const call of vi.mocked(fake.hass.connection.subscribeMessage).mock.calls) {
+      expect(call[2]).toEqual({ resubscribe: false });
+    }
+    expect(fake.unsubscribeIds()).toEqual([]);
+    expect(fake.staleUnsubscribes()).toEqual([]);
+    // One server event is one reload, not one per leftover subscription.
+    const loads = fake.homeCalls();
+    fake.deliver('home');
+    await settle(panel);
+    expect(fake.homeCalls()).toBe(loads + 1);
+  });
+
+  it('does not flash Loading on a quiet reconnect, and looks the entry up once', async () => {
+    const fake = fakeHass();
+    const panel = await mountPanel({ hass: fake.hass, panel: { config: {} } });
+    expect(fake.entryCalls()).toBe(1);
+    const texts: string[] = [];
+    const observer = new MutationObserver(() => texts.push(panel.shadowRoot!.textContent ?? ''));
+    observer.observe(panel.shadowRoot!, { childList: true, subtree: true, characterData: true });
+    const shown = panel.shadowRoot!.querySelector('maxsen-floorplan-view');
+
+    fake.reconnect();
+    // Home Assistant hands the panel a fresh `panel` object when it is back.
+    panel.panel = { config: {} };
+    await settle(panel);
+    observer.disconnect();
+
+    expect(fake.entryCalls()).toBe(2);
+    expect(fake.homeCalls()).toBe(2);
+    expect(texts.filter((t) => t.includes('Loading'))).toEqual([]);
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).toBe(shown);
+    expect(fake.liveSubscriptions()).toBe(1);
   });
 
   it('backs off 2 s, 5 s, 10 s, then tries every 30 s', async () => {

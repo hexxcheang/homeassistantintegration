@@ -304,10 +304,11 @@ describe('createFakeHass: websocket', () => {
     vi.useFakeTimers();
     const fake = createFakeHass(fresh(), admin);
     const events: string[] = [];
-    await fake.connection.subscribeMessage<{ event: string }>((m) => events.push(m.event), {
-      type: 'maxsen/subscribe',
-      entry_id: ENTRY,
-    });
+    await fake.connection.subscribeMessage<{ event: string }>(
+      (m) => events.push(m.event),
+      { type: 'maxsen/subscribe', entry_id: ENTRY },
+      { resubscribe: false },
+    );
     const ready = vi.fn();
     fake.connection.addEventListener!('ready', ready);
     const removed = vi.fn();
@@ -324,14 +325,47 @@ describe('createFakeHass: websocket', () => {
       fake.connection.subscribeMessage(() => undefined, { type: 'maxsen/subscribe', entry_id: ENTRY }),
     ).rejects.toMatchObject({ code: 'unknown_command' });
     await expect(getHome(fake)).rejects.toMatchObject({ code: 'unknown_command' });
+    // The integration's entry is listed but not loaded yet.
+    expect(await fake.callWS({ type: 'config_entries/get', domain: 'maxsen' })).toMatchObject([
+      { entry_id: ENTRY, state: 'not_loaded' },
+    ]);
 
     vi.advanceTimersByTime(3_000);
+    expect(await fake.callWS({ type: 'config_entries/get', domain: 'maxsen' })).toMatchObject([
+      { state: 'loaded' },
+    ]);
     await fake.connection.subscribeMessage<{ event: string }>((m) => events.push(m.event), {
       type: 'maxsen/subscribe',
       entry_id: ENTRY,
     });
     await ws(fake, { type: 'maxsen/quick_panel/set', items: [] });
     expect(events).toEqual(['quick_panel']);
+  });
+
+  it('keeps a subscription across a restart unless it was made with resubscribe: false, as the websocket client does', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const kept: string[] = [];
+    const dropped: string[] = [];
+    const message = { type: 'maxsen/subscribe', entry_id: ENTRY };
+    const stopKept = await fake.connection.subscribeMessage<{ event: string }>(
+      (m) => kept.push(m.event),
+      message,
+    );
+    const stopDropped = await fake.connection.subscribeMessage<{ event: string }>(
+      (m) => dropped.push(m.event),
+      message,
+      { resubscribe: false },
+    );
+
+    fake.restart(0);
+    await ws(fake, { type: 'maxsen/quick_panel/set', items: [] });
+
+    expect(kept).toEqual(['quick_panel']);
+    expect(dropped).toEqual([]);
+    await expect(stopDropped()).rejects.toMatchObject({ code: 'not_found' });
+    await expect(stopKept()).resolves.toBeUndefined();
+    // Ending one twice is an error in Home Assistant too.
+    await expect(stopKept()).rejects.toMatchObject({ code: 'not_found' });
   });
 
   it('refuses to subscribe to something else', async () => {

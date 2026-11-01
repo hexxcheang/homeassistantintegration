@@ -1,5 +1,5 @@
 import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
-import { findEntryId, getHome, subscribe } from './api.ts';
+import { findEntry, getHome, subscribe } from './api.ts';
 import './floorplan-view.ts';
 import './link-mode.ts';
 import './quick-panel.ts';
@@ -71,6 +71,8 @@ export class MaxsenHomePanel extends LitElement {
   declare private _selected: string[];
 
   private _entryId: string | undefined;
+  /** The entry id the card or panel was configured with when the current run started, if any. */
+  private _configuredEntryId: string | undefined;
   private _started = false;
   /** Bumped on every stop, so a load that finishes late can tell it is no longer wanted. */
   private _run = 0;
@@ -146,8 +148,13 @@ export class MaxsenHomePanel extends LitElement {
   override updated(changed: Map<PropertyKey, unknown>): void {
     if (!this.hass) return;
     if (this.isConnected) this._listen(this.hass.connection);
-    // The card can be pointed at another home while it is on screen.
-    if (this._started && changed.has('panel') && this.panel?.config?.entry_id !== this._entryId) {
+    // The card can be pointed at another home while it is on screen. Home Assistant also hands the
+    // panel a new `panel` object after a reconnect; only a different configured id restarts.
+    if (
+      this._started &&
+      changed.has('panel') &&
+      this.panel?.config?.entry_id !== this._configuredEntryId
+    ) {
       this._stop();
     }
     if (!this._started) void this._start();
@@ -163,9 +170,15 @@ export class MaxsenHomePanel extends LitElement {
     this._unsubscribe = undefined;
   }
 
-  /** Load and subscribe again, keeping what is on screen meanwhile. */
+  /**
+   * Load and subscribe again, keeping what is on screen meanwhile. Only called once the old
+   * subscription is gone with its connection (a reconnect, or a retry after nothing was
+   * subscribed), so its unsubscribe function is dropped, not called: it would name an id the
+   * server no longer knows.
+   */
   private _resubscribe(): void {
     const attempt = this._attempt;
+    this._unsubscribe = undefined;
     this._stop();
     this._attempt = attempt;
     void this._start(true);
@@ -177,15 +190,23 @@ export class MaxsenHomePanel extends LitElement {
     if (!hass) return;
     this._started = true;
     const run = this._run;
+    this._configuredEntryId = this.panel?.config?.entry_id;
     if (!quiet) this._status = 'loading';
     try {
-      const entryId = this.panel?.config?.entry_id ?? (await findEntryId(hass));
-      if (run !== this._run) return;
-      this._entryId = entryId;
+      let entryId = this._configuredEntryId;
       if (!entryId) {
-        this._status = 'none';
-        return;
+        const entry = await findEntry(hass);
+        if (run !== this._run) return;
+        if (!entry) {
+          this._entryId = undefined;
+          this._status = 'none';
+          return;
+        }
+        // Listed but not loaded: Maxsen is still starting. Try again rather than say it is missing.
+        if (entry.state !== 'loaded') throw new Error(`Maxsen is ${entry.state}`);
+        entryId = entry.entryId;
       }
+      this._entryId = entryId;
       const home = await getHome(hass, entryId);
       if (run !== this._run) return;
       this._home = home;

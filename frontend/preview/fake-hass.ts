@@ -48,9 +48,11 @@ export interface FakeHass extends HassLike {
   /** Keep a file for `maxsen/refresh/preview` with `file_id`. Returns the id. */
   uploadFile(pkg: HomePackage): string;
   /**
-   * Pretend Home Assistant restarted: subscriptions are dropped, the connection fires `ready` (as
-   * home-assistant-js-websocket does after reconnecting) and the maxsen commands answer
-   * `unknown_command` for `startingMs` while the integration is still loading.
+   * Pretend Home Assistant restarted, as home-assistant-js-websocket sees it: the connection fires
+   * `ready` after reconnecting; a subscription made with `resubscribe: false` is gone (calling its
+   * unsubscribe answers `not_found`) while the others are resubscribed by the connection itself.
+   * For `startingMs` the integration is still loading: its entry is `not_loaded` and the maxsen
+   * commands answer `unknown_command`.
    */
   restart(startingMs?: number): void;
   /** Flip the door sensors every 20 s so alerts can be seen. Returns the stop function. */
@@ -366,7 +368,12 @@ export function createFakeHass(
   const previews = new Map<string, Preview>();
   let counter = 0;
   const listeners = new Set<() => void>();
-  const subscribers = new Set<(event: HomeEvent) => void>();
+  /** A `maxsen/subscribe` as home-assistant-js-websocket keeps it: `resubscribe` is false when the caller asked for that. */
+  interface Subscription {
+    notify(event: HomeEvent): void;
+    resubscribe: boolean;
+  }
+  const subscribers = new Set<Subscription>();
   const readyListeners = new Set<() => void>();
   /** Until this time (ms) the maxsen commands are not registered yet, as right after a restart. */
   let startingUntil = 0;
@@ -393,7 +400,7 @@ export function createFakeHass(
   }
 
   function emit(event: HomeEvent): void {
-    for (const subscriber of [...subscribers]) subscriber(event);
+    for (const subscriber of [...subscribers]) subscriber.notify(event);
   }
 
   function setStates(world: World, id: string, state: string, attributes: Attributes = {}): void {
@@ -668,7 +675,14 @@ export function createFakeHass(
       switch (msg.type) {
         case 'config_entries/get':
           return msg['domain'] === undefined || msg['domain'] === 'maxsen'
-            ? [{ entry_id: ENTRY_ID, domain: 'maxsen', title: stored.project.title, state: 'loaded' }]
+            ? [
+                {
+                  entry_id: ENTRY_ID,
+                  domain: 'maxsen',
+                  title: stored.project.title,
+                  state: Date.now() < startingUntil ? 'not_loaded' : 'loaded',
+                },
+              ]
             : [];
         case 'maxsen/home':
           requireHome(msg);
@@ -702,15 +716,24 @@ export function createFakeHass(
       async subscribeMessage<T>(
         callback: (message: T) => void,
         message: { type: string; [key: string]: unknown },
-      ): Promise<() => void> {
+        options?: { resubscribe?: boolean },
+      ): Promise<() => Promise<void>> {
         if (message.type !== 'maxsen/subscribe') {
           throw new CommandError('unknown_command', `Unknown command ${message.type}`);
         }
         requireStarted(message.type);
         requireHome(message);
-        const subscriber = (event: HomeEvent): void => callback({ event } as T);
+        const subscriber: Subscription = {
+          notify: (event) => callback({ event } as T),
+          resubscribe: options?.resubscribe !== false,
+        };
         subscribers.add(subscriber);
-        return () => void subscribers.delete(subscriber);
+        // Like Home Assistant, ending a subscription that is already gone is an error.
+        return async () => {
+          if (!subscribers.delete(subscriber)) {
+            throw new CommandError('not_found', 'Subscription not found.');
+          }
+        };
       },
       addEventListener(event, listener) {
         if (event === 'ready') readyListeners.add(listener);
@@ -772,7 +795,9 @@ export function createFakeHass(
       return id;
     },
     restart(startingMs = 5_000) {
-      subscribers.clear();
+      for (const subscriber of [...subscribers]) {
+        if (!subscriber.resubscribe) subscribers.delete(subscriber);
+      }
       startingUntil = Date.now() + startingMs;
       for (const listener of [...readyListeners]) listener();
     },

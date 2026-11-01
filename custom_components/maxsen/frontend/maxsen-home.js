@@ -316,10 +316,14 @@ function he(e, t) {
 }
 // src/api.ts
 async function ge(e) {
-	return (await e.callWS({
+	let t = await e.callWS({
 		type: "config_entries/get",
 		domain: "maxsen"
-	})).find((e) => e.state === "loaded")?.entry_id;
+	}), n = t.find((e) => e.state === "loaded") ?? t[0];
+	return n && {
+		entryId: n.entry_id,
+		state: n.state
+	};
 }
 function _e(e, t) {
 	return e.callWS({
@@ -331,7 +335,7 @@ function ve(e, t, n) {
 	return e.connection.subscribeMessage((e) => n(e.event), {
 		type: "maxsen/subscribe",
 		entry_id: t
-	});
+	}, { resubscribe: !1 });
 }
 function ye(e, t, n) {
 	return e.callWS({
@@ -2979,6 +2983,7 @@ var pn = class extends U {
 		_selected: { state: !0 }
 	};
 	_entryId;
+	_configuredEntryId;
 	_started = !1;
 	_run = 0;
 	_unsubscribe;
@@ -3014,28 +3019,34 @@ var pn = class extends U {
 		this._linking = !1, this._selected = [];
 	}
 	updated(e) {
-		this.hass && (this.isConnected && this._listen(this.hass.connection), this._started && e.has("panel") && this.panel?.config?.entry_id !== this._entryId && this._stop(), this._started || this._start());
+		this.hass && (this.isConnected && this._listen(this.hass.connection), this._started && e.has("panel") && this.panel?.config?.entry_id !== this._configuredEntryId && this._stop(), this._started || this._start());
 	}
 	_stop() {
 		this._run++, this._started = !1, this._attempt = 0, clearTimeout(this._retryTimer), this._retryTimer = void 0, dn(this._unsubscribe), this._unsubscribe = void 0;
 	}
 	_resubscribe() {
 		let e = this._attempt;
-		this._stop(), this._attempt = e, this._start(!0);
+		this._unsubscribe = void 0, this._stop(), this._attempt = e, this._start(!0);
 	}
 	async _start(e = !1) {
 		let t = this.hass;
 		if (!t) return;
 		this._started = !0;
 		let n = this._run;
-		e || (this._status = "loading");
+		this._configuredEntryId = this.panel?.config?.entry_id, e || (this._status = "loading");
 		try {
-			let e = this.panel?.config?.entry_id ?? await ge(t);
-			if (n !== this._run) return;
-			if (this._entryId = e, !e) {
-				this._status = "none";
-				return;
+			let e = this._configuredEntryId;
+			if (!e) {
+				let r = await ge(t);
+				if (n !== this._run) return;
+				if (!r) {
+					this._entryId = void 0, this._status = "none";
+					return;
+				}
+				if (r.state !== "loaded") throw Error(`Maxsen is ${r.state}`);
+				e = r.entryId;
 			}
+			this._entryId = e;
 			let r = await _e(t, e);
 			if (n !== this._run) return;
 			this._home = r, this._status = "ready";
@@ -3248,4 +3259,4 @@ customElements.get("maxsen-floorplan-card") || customElements.define("maxsen-flo
 	description: "The floor plans of your Maxsen home, with live device state.",
 	preview: !1
 });
-export { g as LIGHTING_CATEGORIES, mn as MaxsenFloorplanCard, Pt as MaxsenFloorplanView, pn as MaxsenHomePanel, an as MaxsenLinkMode, Qt as MaxsenQuickPanel, Ce as createStarterScenes, ge as findEntryId, _e as getHome, fn as layoutFor, he as linkCandidates, we as loadImage, Se as refreshApply, xe as refreshPreview, un as retryDelay, u as sceneToSvg, ye as setLinks, be as setQuickPanel, ve as subscribe, rn as summaryLine, Te as uploadHomeFile, h as visualState };
+export { g as LIGHTING_CATEGORIES, mn as MaxsenFloorplanCard, Pt as MaxsenFloorplanView, pn as MaxsenHomePanel, an as MaxsenLinkMode, Qt as MaxsenQuickPanel, Ce as createStarterScenes, ge as findEntry, _e as getHome, fn as layoutFor, he as linkCandidates, we as loadImage, Se as refreshApply, xe as refreshPreview, un as retryDelay, u as sceneToSvg, ye as setLinks, be as setQuickPanel, ve as subscribe, rn as summaryLine, Te as uploadHomeFile, h as visualState };

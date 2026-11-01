@@ -281,11 +281,13 @@ export type HassConnectionEvent = 'ready' | 'disconnected' | 'reconnect-error';
 export interface HassConnection {
   /**
    * Resolves to the function that ends the subscription. In Home Assistant that function returns
-   * a promise, which rejects when the subscription is already gone.
+   * a promise, which rejects when the subscription is already gone. Unless `resubscribe` is
+   * `false`, the connection subscribes again by itself after a reconnect.
    */
   subscribeMessage<T>(
     callback: (message: T) => void,
     subscribeMessage: { type: string; [key: string]: unknown },
+    options?: { resubscribe?: boolean },
   ): Promise<() => void | Promise<void>>;
   addEventListener?(event: HassConnectionEvent, listener: () => void): void;
   removeEventListener?(event: HassConnectionEvent, listener: () => void): void;

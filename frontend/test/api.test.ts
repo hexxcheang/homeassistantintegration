@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createStarterScenes,
-  findEntryId,
+  findEntry,
   getHome,
   loadImage,
   refreshApply,
@@ -43,20 +43,26 @@ describe('websocket wrappers', () => {
     ]);
   });
 
-  it('finds the first loaded Maxsen entry', async () => {
+  it('finds the first loaded Maxsen entry, with its state', async () => {
     const hass = makeHass();
     vi.spyOn(hass, 'callWS').mockResolvedValue([
       { entry_id: 'broken', state: 'setup_error' },
       { entry_id: 'ok', state: 'loaded' },
     ] as never);
-    expect(await findEntryId(hass)).toBe('ok');
+    expect(await findEntry(hass)).toEqual({ entryId: 'ok', state: 'loaded' });
     expect(hass.callWS).toHaveBeenCalledWith({ type: 'config_entries/get', domain: 'maxsen' });
   });
 
-  it('finds nothing when no entry is loaded', async () => {
+  it('reports an entry that is listed but not loaded, rather than none', async () => {
+    const hass = makeHass();
+    vi.spyOn(hass, 'callWS').mockResolvedValue([{ entry_id: 'e1', state: 'not_loaded' }] as never);
+    expect(await findEntry(hass)).toEqual({ entryId: 'e1', state: 'not_loaded' });
+  });
+
+  it('finds nothing when no entry exists', async () => {
     const hass = makeHass();
     vi.spyOn(hass, 'callWS').mockResolvedValue([] as never);
-    expect(await findEntryId(hass)).toBeUndefined();
+    expect(await findEntry(hass)).toBeUndefined();
   });
 });
 
@@ -80,6 +86,13 @@ describe('subscribe', () => {
     expect(spy.mock.calls[0]?.[1]).toEqual({ type: 'maxsen/subscribe', entry_id: 'e1' });
     expect(seen).toEqual(['links', 'home']);
     expect(stop).toBe(unsub);
+  });
+
+  it('passes { resubscribe: false }, so a reconnect does not bring the subscription back on its own', async () => {
+    const hass = makeHass();
+    const spy = vi.spyOn(hass.connection, 'subscribeMessage').mockResolvedValue(() => undefined);
+    await subscribe(hass, 'e1', () => undefined);
+    expect(spy.mock.calls[0]?.[2]).toEqual({ resubscribe: false });
   });
 });
 

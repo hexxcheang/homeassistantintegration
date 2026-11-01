@@ -22,6 +22,9 @@ work; use a home file instead.
 
 ## Install with HACS
 
+> **Not released yet:** version 0.1.0 is published after Maxsen's first hardware test. Until
+> then, install only on a test Home Assistant.
+
 1. In Home Assistant open **HACS**.
 2. Open the three-dot menu at the top right and choose **Custom repositories**.
 3. In **Repository** enter `https://github.com/hexxcheang/homeassistantintegration`. In **Type**
@@ -110,13 +113,16 @@ and pick it. The file must be from the same project.
 ## Disconnecting
 
 In the planner, open the project's **Home Assistant** dialog and tap **Disconnect** next to the
-connection (staff do this). The next time someone taps **Refresh from planner**, Home Assistant
+connection (staff do this). The next time an installer taps **Refresh from planner**, Home Assistant
 shows "Connection revoked: ask Maxsen for a new pairing code". The drawing, links, quick panel
 and scenes keep working as they are; only refreshing stops.
 
-To connect again, create a new pairing code. The integration cannot yet take a new code for a home
-it already has, so remove **Maxsen Home** in **Settings**, **Devices & services** and add it again.
-That clears the links, so link the devices again afterwards.
+To connect again you need a new pairing code (the old one was used up), or the home file. The
+integration cannot yet take a new code for a home it already has, so remove **Maxsen Home** in
+**Settings**, **Devices & services** and add it again. Removing it clears everything kept for that
+home: the links, the quick panel and the starter scenes. After adding it again, go through the
+installer checklist: switch **Installer mode** on, link the devices (step 3), tap **Create starter
+scenes** (step 4), set up the quick panel (step 5), and switch **Installer mode** off again.
 
 ## Troubleshooting
 
@@ -127,7 +133,7 @@ What the integration says, and what to do:
 | That code did not work. Check it, or create a new one in the planner. | Check the characters. A code works once and runs out after 24 hours; create a new one. |
 | Too many tries. Wait a minute and try again. | Wait, then try again. |
 | Could not reach the planner. Check the address and your connection. | Check the **Planner address** and that Home Assistant has internet. |
-| Enter the planner address starting with https:// | Use the full address, for example `https://planner.example.com`. Plain `http://` is accepted only for `localhost`. |
+| Enter the planner address starting with https:// | Use the full address, for example `https://planner.example.com`. Plain `http://` is accepted only for `localhost` and `127.0.0.1`. |
 | The planner has no home to send yet: … | Follow the planner's message, usually "Save this project to the team first." |
 | This is not a Maxsen home file. | Use the file from the planner's **Download home file**, not another `.json`. |
 | This home file is from a newer planner. Update this integration. | In HACS update **Maxsen Home**, restart Home Assistant. |

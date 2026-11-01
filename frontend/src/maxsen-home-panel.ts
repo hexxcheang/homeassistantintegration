@@ -1,10 +1,14 @@
 import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import { findEntryId, getHome, subscribe } from './api.ts';
 import './floorplan-view.ts';
+import './link-mode.ts';
+import './quick-panel.ts';
 import type { HassLike, HomeResponse } from './types.ts';
 
 /** Floor plan and quick panel sit side by side when the space is landscape and this wide. */
 const SIDE_BY_SIDE_MIN_WIDTH = 900;
+
+const NO_SELECTION: string[] = [];
 
 export type PanelLayout = 'side' | 'stacked';
 
@@ -19,8 +23,10 @@ interface PanelInfo {
 }
 
 /**
- * The Maxsen Home panel: the floor plan view plus, later, the quick panel in `.quick-panel-slot`.
- * Also the body of the Lovelace card, which sets `embedded` to drop the sidebar toolbar.
+ * The Maxsen Home panel: the floor plan view and, beside or under it, the quick panel. An
+ * administrator with installer mode on also gets an Installer button, which swaps the quick panel
+ * for the link tools. Also the body of the Lovelace card, which sets `embedded` to drop the
+ * sidebar toolbar.
  */
 export class MaxsenHomePanel extends LitElement {
   static override properties = {
@@ -31,6 +37,8 @@ export class MaxsenHomePanel extends LitElement {
     _home: { state: true },
     _status: { state: true },
     _layout: { state: true },
+    _linking: { state: true },
+    _selected: { state: true },
   };
 
   declare hass: HassLike | undefined;
@@ -40,6 +48,10 @@ export class MaxsenHomePanel extends LitElement {
   declare private _home: HomeResponse | undefined;
   declare private _status: Status;
   declare private _layout: PanelLayout;
+  /** The installer tools are open. */
+  declare private _linking: boolean;
+  /** The elements selected in link mode, outlined on the drawing. */
+  declare private _selected: string[];
 
   private _entryId: string | undefined;
   private _started = false;
@@ -54,6 +66,8 @@ export class MaxsenHomePanel extends LitElement {
     this.embedded = false;
     this._status = 'loading';
     this._layout = 'stacked';
+    this._linking = false;
+    this._selected = [];
   }
 
   override connectedCallback(): void {
@@ -72,6 +86,20 @@ export class MaxsenHomePanel extends LitElement {
     this._observer?.disconnect();
     this._observer = undefined;
     this._stop();
+  }
+
+  /** Installer tools need an administrator and installer mode; the server checks both too. */
+  private _mayInstall(): boolean {
+    return Boolean(this.hass?.user?.is_admin && this._home?.installer_mode);
+  }
+
+  override willUpdate(): void {
+    if (this._linking && !this._mayInstall()) this._closeInstaller();
+  }
+
+  private _closeInstaller(): void {
+    this._linking = false;
+    this._selected = [];
   }
 
   override updated(changed: Map<PropertyKey, unknown>): void {
@@ -146,14 +174,43 @@ export class MaxsenHomePanel extends LitElement {
           Could not load the home.
           <button class="retry" @click=${this._retry}>Try again</button>
         </div>`;
-      case 'ready':
+      case 'ready': {
+        const linking = this._linking;
         return html`
-          <div class="body ${this._layout}">
-            <maxsen-floorplan-view class="view" .hass=${this.hass} .home=${this._home} mode="use"></maxsen-floorplan-view>
-            <div class="quick-panel-slot"></div>
+          <div class="body ${this._layout} ${linking ? 'linking' : ''}">
+            <maxsen-floorplan-view
+              class="view"
+              .hass=${this.hass}
+              .home=${this._home}
+              .selected=${linking ? this._selected : NO_SELECTION}
+              mode=${linking ? 'link' : 'use'}
+              @maxsen-element-tap=${this._onElementTap}
+            ></maxsen-floorplan-view>
+            <div class="quick-panel-slot">
+              ${linking
+                ? html`<maxsen-link-mode
+                    .hass=${this.hass}
+                    .home=${this._home}
+                    .entryId=${this._entryId}
+                    @maxsen-selection=${(e: CustomEvent<{ selected: string[] }>) => (this._selected = e.detail.selected)}
+                    @maxsen-link-done=${this._closeInstaller}
+                  ></maxsen-link-mode>`
+                : html`<maxsen-quick-panel .hass=${this.hass} .home=${this._home} .entryId=${this._entryId}>
+                    ${this._mayInstall()
+                      ? html`<button slot="actions" class="installer" @click=${() => (this._linking = true)}>
+                          Installer
+                        </button>`
+                      : nothing}
+                  </maxsen-quick-panel>`}
+            </div>
           </div>
         `;
+      }
     }
+  }
+
+  private _onElementTap(e: CustomEvent<{ elementId: string }>): void {
+    this.shadowRoot?.querySelector('maxsen-link-mode')?.tap(e.detail.elementId);
   }
 
   override render(): TemplateResult {
@@ -171,6 +228,8 @@ export class MaxsenHomePanel extends LitElement {
 
   static override styles = css`
     :host {
+      /* The sheets and dialogs of the quick panel and link tools cover the panel, not the page. */
+      position: relative;
       display: flex;
       flex-direction: column;
       height: 100%;
@@ -215,16 +274,30 @@ export class MaxsenHomePanel extends LitElement {
       flex: none;
       overflow: auto;
     }
-    .quick-panel-slot:empty {
-      display: none;
-    }
     .side .quick-panel-slot {
       width: 340px;
       border-left: 1px solid var(--divider-color, #e3e6ea);
     }
+    .side.linking .quick-panel-slot {
+      width: 380px;
+    }
     .stacked .quick-panel-slot {
       max-height: 40%;
       border-top: 1px solid var(--divider-color, #e3e6ea);
+    }
+    .stacked.linking .quick-panel-slot {
+      max-height: 55%;
+    }
+    .installer {
+      min-height: 44px;
+      padding: 0 20px;
+      border: 1px solid var(--divider-color, #cfd3d9);
+      border-radius: 22px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 16px;
+      cursor: pointer;
     }
     .message {
       margin: auto;

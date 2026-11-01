@@ -9,6 +9,7 @@ import {
   setLinks,
   setQuickPanel,
   subscribe,
+  uploadHomeFile,
 } from '../src/api.ts';
 import { makeHass } from './helpers.ts';
 
@@ -101,5 +102,32 @@ describe('loadImage', () => {
     const create = vi.spyOn(URL, 'createObjectURL');
     await expect(loadImage(hass, '/api/maxsen/image/e1/x')).rejects.toThrow('404');
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe('uploadHomeFile', () => {
+  const file = new File(['{}'], 'home.json', { type: 'application/json' });
+
+  it('posts the file as multipart to the upload endpoint and returns the file id', async () => {
+    const hass = makeHass();
+    const fetch = vi
+      .spyOn(hass, 'fetchWithAuth')
+      .mockResolvedValue(new Response(JSON.stringify({ file_id: 'f-1' }), { status: 200 }));
+
+    expect(await uploadHomeFile(hass, file)).toBe('f-1');
+
+    const [path, init] = fetch.mock.calls[0]!;
+    expect(path).toBe('/api/file_upload');
+    expect(init?.method).toBe('POST');
+    expect((init?.body as FormData).get('file')).toBeInstanceOf(File);
+  });
+
+  it('throws when Home Assistant refuses the file or answers without an id', async () => {
+    const hass = makeHass();
+    const fetch = vi.spyOn(hass, 'fetchWithAuth');
+    fetch.mockResolvedValueOnce(new Response('no', { status: 413 }));
+    await expect(uploadHomeFile(hass, file)).rejects.toThrow('413');
+    fetch.mockResolvedValueOnce(new Response('{}', { status: 200 }));
+    await expect(uploadHomeFile(hass, file)).rejects.toThrow('no file id');
   });
 });

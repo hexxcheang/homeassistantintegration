@@ -2,7 +2,8 @@ import { LitElement, css, html, nothing, svg, type SVGTemplateResult, type Templ
 import { classMap } from 'lit/directives/class-map.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
 import { loadImage } from './api.ts';
-import { deviceEntities, domainOf } from './hass-util.ts';
+import { domainOf } from './hass-util.ts';
+import { CONTROLLABLE, linkEntityIds, primaryEntity, toggleEntities } from './operate.ts';
 import { LIGHTING_CATEGORIES } from './link-candidates.ts';
 import { sceneToSvg, type SvgNode } from './scene-svg.ts';
 import type {
@@ -31,10 +32,6 @@ const NOTICE_MS = 4000;
 /** Used until the stage has been measured, and in environments without layout. */
 const FALLBACK_STAGE = { w: 800, h: 600 };
 
-/** What a tap toggles. Everything else linked opens its more-info dialog instead. */
-const CONTROLLABLE = new Set(['light', 'switch', 'fan', 'cover']);
-/** Which entity of a device is "the first": the one that says most about it. */
-const PRIMARY_ORDER = ['climate', 'cover', 'lock', 'light', 'switch', 'fan', 'binary_sensor', 'sensor', 'camera'];
 /** Lights glow when on; so do smart switches, which are mostly lights in disguise. */
 const GLOWING = new Set<string>([...LIGHTING_CATEGORIES, 'smart-switches']);
 /** The categories whose reading is shown as a pill beside the element. */
@@ -54,27 +51,6 @@ function sceneNodes(plan: HomePlan): SvgNode[] {
     nodeCache.set(plan.scene, nodes);
   }
   return nodes;
-}
-
-/**
- * The entity ids behind a link that have a state. A device brings its registry entities; a link
- * to something Home Assistant no longer has gives none.
- */
-function linkEntityIds(link: Link, hass: HassLike): string[] {
-  if (link.type === 'entity') return hass.states[link.id] ? [link.id] : [];
-  return deviceEntities(hass, link.id)
-    .map((e) => e.entity_id)
-    .filter((id) => hass.states[id]);
-}
-
-/** The entity that says most about a link, for the more-info dialog. */
-function primaryEntity(ids: string[], hass: HassLike): string | undefined {
-  const rank = (id: string): number => {
-    const battery = hass.states[id]?.attributes['device_class'] === 'battery';
-    const i = PRIMARY_ORDER.indexOf(domainOf(id));
-    return (i === -1 ? PRIMARY_ORDER.length : i) + (battery ? 100 : 0);
-  };
-  return [...ids].sort((a, b) => rank(a) - rank(b))[0];
 }
 
 interface Press {
@@ -101,6 +77,7 @@ export class MaxsenFloorplanView extends LitElement {
     hass: { attribute: false },
     home: { attribute: false },
     mode: { type: String },
+    selected: { attribute: false },
     _levelId: { state: true },
     _planType: { state: true },
     _images: { state: true },
@@ -112,6 +89,8 @@ export class MaxsenFloorplanView extends LitElement {
   declare hass: HassLike | undefined;
   declare home: HomeResponse | undefined;
   declare mode: ViewMode;
+  /** Element ids to outline in link mode. */
+  declare selected: readonly string[];
   declare private _levelId: string | undefined;
   declare private _planType: HomePlan['type'];
   /** Image id to object URL. */
@@ -139,6 +118,7 @@ export class MaxsenFloorplanView extends LitElement {
   constructor() {
     super();
     this.mode = 'use';
+    this.selected = [];
     this._planType = 'smart-home';
     this._images = new Map();
     this._stage = FALLBACK_STAGE;
@@ -468,24 +448,7 @@ export class MaxsenFloorplanView extends LitElement {
   }
 
   private async _toggle(ids: string[]): Promise<void> {
-    const hass = this.hass;
-    if (!hass) return;
-    const covers = ids.filter((id) => domainOf(id) === 'cover');
-    const open = covers.filter((id) => hass.states[id]?.state === 'closed');
-    const close = covers.filter((id) => !open.includes(id));
-    const calls: [string, string, string[]][] = [
-      ['homeassistant', 'toggle', ids.filter((id) => domainOf(id) !== 'cover')],
-      ['cover', 'open_cover', open],
-      ['cover', 'close_cover', close],
-    ];
-    for (const [domain, service, entityIds] of calls) {
-      if (entityIds.length === 0) continue;
-      try {
-        await hass.callService(domain, service, { entity_id: entityIds });
-      } catch {
-        this._showNotice('Could not reach that device.');
-      }
-    }
+    if (this.hass && !(await toggleEntities(this.hass, ids))) this._showNotice('Could not reach that device.');
   }
 
   private _showNotice(text: string): void {
@@ -557,6 +520,28 @@ export class MaxsenFloorplanView extends LitElement {
     </g>`;
   }
 
+  /** Link mode only: a halo behind a selected element, a dashed ring around one with no working link. */
+  private _renderLinkMarks(item: SceneItem, status: VisualState['status'], selected: boolean): SVGTemplateResult {
+    if (item.type === 'note') return svg``;
+    const flawed = status === 'unlinked' || status === 'missing';
+    const ringClass = classMap({ 'link-ring': true, missing: status === 'missing' });
+    if (item.type === 'marker') {
+      const r = Math.max(item.size * 0.85, 20);
+      return svg`
+        ${selected ? svg`<circle class="halo" cx=${item.x} cy=${item.y} r=${round(r + 6)} />` : nothing}
+        ${flawed ? svg`<circle class=${ringClass} cx=${item.x} cy=${item.y} r=${round(r)} />` : nothing}
+      `;
+    }
+    return svg`
+      ${selected
+        ? svg`<path class="halo line" d=${item.d} stroke-width=${item.strokeWidth + 16} />`
+        : nothing}
+      ${flawed
+        ? svg`<path class=${ringClass} d=${item.d} stroke-width=${item.strokeWidth + 8} />`
+        : nothing}
+    `;
+  }
+
   private _renderItem(item: SceneItem, node: SvgNode, plan: HomePlan, hitRadius: number): SVGTemplateResult {
     const id = item.elementId;
     const children = (node.children ?? []).map((c) => this._renderNode(c));
@@ -567,8 +552,16 @@ export class MaxsenFloorplanView extends LitElement {
     const glowing = state.status === 'on' && GLOWING.has(item.categoryId);
     const filter = glowing ? (item.type === 'path' ? 'url(#maxsen-glow-path)' : 'url(#maxsen-glow)') : undefined;
     const pill = state.text && PILLED.has(item.categoryId) ? this._renderPill(item, state.text, plan.width) : nothing;
+    const linking = this.mode === 'link';
+    const selected = linking && this.selected.includes(id);
     return svg`<g
-      class=${classMap({ element: true, [item.type]: true, [state.status]: true })}
+      class=${classMap({
+        element: true,
+        [item.type]: true,
+        [state.status]: true,
+        linking,
+        selected,
+      })}
       data-element-id=${id}
     >
       ${item.type === 'marker'
@@ -583,6 +576,7 @@ export class MaxsenFloorplanView extends LitElement {
             stroke-linejoin="round"
             pointer-events="stroke"
           />`}
+      ${linking ? this._renderLinkMarks(item, state.status, selected) : nothing}
       ${state.status === 'alert' && item.type === 'marker'
         ? svg`<circle class="alert-ring" cx=${item.x} cy=${item.y} r=${Math.max(item.size * 0.9, 18)} />`
         : nothing}
@@ -797,6 +791,44 @@ export class MaxsenFloorplanView extends LitElement {
     }
     .static {
       pointer-events: none;
+    }
+    .element.linking {
+      cursor: pointer;
+    }
+    .element.linking.unlinked,
+    .element.linking.missing {
+      opacity: 0.8;
+    }
+    .halo {
+      fill: color-mix(in srgb, var(--primary-color, #2f6fed) 22%, transparent);
+      stroke: var(--primary-color, #2f6fed);
+      pointer-events: none;
+    }
+    circle.halo {
+      stroke-width: 4;
+    }
+    /* A line's width is set on the element, in plan units. */
+    .halo.line {
+      fill: none;
+      stroke: color-mix(in srgb, var(--primary-color, #2f6fed) 45%, transparent);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .link-ring {
+      fill: none;
+      stroke: #6b7280;
+      stroke-dasharray: 7 5;
+      pointer-events: none;
+    }
+    path.link-ring {
+      stroke-dasharray: 6 6;
+      opacity: 0.55;
+    }
+    circle.link-ring {
+      stroke-width: 3;
+    }
+    .link-ring.missing {
+      stroke: #e5322d;
     }
     .alert-ring {
       fill: none;

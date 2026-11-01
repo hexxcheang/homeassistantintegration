@@ -92,10 +92,13 @@ describe('<maxsen-home-panel>', () => {
       type: 'maxsen/subscribe',
       entry_id: 'e1',
     });
-    // The quick panel (a later task) drops into an empty slot.
+    // The quick panel sits in the slot beside (or under) the drawing.
     const slot = panel.shadowRoot!.querySelector('.quick-panel-slot');
     expect(slot).not.toBeNull();
-    expect(slot!.childElementCount).toBe(0);
+    const quick = slot!.querySelector('maxsen-quick-panel')!;
+    expect(quick.hass).toBe(fake.hass);
+    expect(quick.home?.package?.project.title).toBe('Test House');
+    expect(quick.entryId).toBe('e1');
   });
 
   it('uses the entry id from the panel config without looking one up', async () => {
@@ -166,6 +169,104 @@ describe('<maxsen-home-panel>', () => {
     resolve(early.unsubscribe);
     await new Promise((r) => setTimeout(r, 0));
     expect(early.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('installer tools in the panel', () => {
+  const linkable = () => homeResponse({ installer_mode: true });
+  const installerButton = (panel: Element): HTMLButtonElement | null =>
+    panel.shadowRoot!.querySelector<HTMLButtonElement>('button.installer');
+  const viewOf = (panel: Element) => panel.shadowRoot!.querySelector('maxsen-floorplan-view')!;
+  const linkModeOf = (panel: Element) => panel.shadowRoot!.querySelector('maxsen-link-mode');
+
+  it('shows the Installer button to an administrator when installer mode is on', async () => {
+    const fake = fakeHass(undefined, linkable());
+    const panel = await mountPanel({ hass: fake.hass });
+    expect(installerButton(panel)?.textContent?.trim()).toBe('Installer');
+  });
+
+  it('hides it from a user who is not an administrator', async () => {
+    const fake = fakeHass(undefined, linkable());
+    fake.hass.user = { is_admin: false };
+    const panel = await mountPanel({ hass: fake.hass });
+    expect(installerButton(panel)).toBeNull();
+  });
+
+  it('hides it when installer mode is off', async () => {
+    const fake = fakeHass(undefined, homeResponse({ installer_mode: false }));
+    const panel = await mountPanel({ hass: fake.hass });
+    expect(installerButton(panel)).toBeNull();
+    expect(panel.shadowRoot!.querySelector('maxsen-quick-panel')).not.toBeNull();
+  });
+
+  it('swaps the quick panel for the link tools, and the view into link mode, until Done', async () => {
+    const fake = fakeHass(undefined, linkable());
+    const panel = await mountPanel({ hass: fake.hass });
+    expect(linkModeOf(panel)).toBeNull();
+
+    installerButton(panel)!.click();
+    await settle(panel);
+
+    const tools = linkModeOf(panel)!;
+    expect(tools).not.toBeNull();
+    expect(tools.entryId).toBe('e1');
+    expect(tools.home?.installer_mode).toBe(true);
+    expect(panel.shadowRoot!.querySelector('maxsen-quick-panel')).toBeNull();
+    expect(viewOf(panel).mode).toBe('link');
+
+    tools.shadowRoot!.querySelector<HTMLButtonElement>('.done')!.click();
+    await settle(panel);
+
+    expect(linkModeOf(panel)).toBeNull();
+    expect(panel.shadowRoot!.querySelector('maxsen-quick-panel')).not.toBeNull();
+    expect(viewOf(panel).mode).toBe('use');
+  });
+
+  it('passes taps on the drawing to the link tools and the selection back to the drawing', async () => {
+    const fake = fakeHass(undefined, linkable());
+    const panel = await mountPanel({ hass: fake.hass });
+    installerButton(panel)!.click();
+    await settle(panel);
+
+    viewOf(panel).dispatchEvent(
+      new CustomEvent('maxsen-element-tap', { detail: { elementId: 'dl1' }, bubbles: true, composed: true }),
+    );
+    await settle(panel);
+
+    expect(viewOf(panel).selected).toEqual(['dl1']);
+    expect(linkModeOf(panel)!.shadowRoot!.textContent).toContain('Luna Downlight');
+
+    linkModeOf(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('.done')!.click();
+    await settle(panel);
+    expect(viewOf(panel).selected).toEqual([]);
+  });
+
+  it('leaves link mode when installer mode is switched off', async () => {
+    const fake = fakeHass(undefined, linkable());
+    const panel = await mountPanel({ hass: fake.hass });
+    installerButton(panel)!.click();
+    await settle(panel);
+    expect(linkModeOf(panel)).not.toBeNull();
+
+    fake.setHome(homeResponse({ installer_mode: false }));
+    fake.deliver('home');
+    await settle(panel);
+
+    expect(linkModeOf(panel)).toBeNull();
+    expect(viewOf(panel).mode).toBe('use');
+    expect(installerButton(panel)).toBeNull();
+  });
+
+  it('leaves link mode when the user stops being an administrator', async () => {
+    const fake = fakeHass(undefined, linkable());
+    const panel = await mountPanel({ hass: fake.hass });
+    installerButton(panel)!.click();
+    await settle(panel);
+
+    panel.hass = { ...fake.hass, user: { is_admin: false } };
+    await settle(panel);
+
+    expect(linkModeOf(panel)).toBeNull();
   });
 });
 

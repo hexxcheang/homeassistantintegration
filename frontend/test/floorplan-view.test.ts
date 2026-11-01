@@ -376,6 +376,54 @@ describe('link mode', () => {
 
     expect(taps).toEqual([]);
   });
+
+  it('outlines the selected elements with a halo, markers and lines alike', async () => {
+    const view = await mountView({
+      hass: withImages(),
+      mode: 'link',
+      selected: ['dl1', 'cur1'],
+      home: homeResponse({ links: { dl1: LIGHT, dl2: LIGHT } }),
+    });
+
+    for (const id of ['dl1', 'cur1']) {
+      expect(group(view, id).classList.contains('selected'), id).toBe(true);
+      expect(group(view, id).querySelector('.halo'), id).not.toBeNull();
+    }
+    expect(group(view, 'dl2').classList.contains('selected')).toBe(false);
+    expect(group(view, 'dl2').querySelector('.halo')).toBeNull();
+
+    view.selected = ['dl2'];
+    await settle(view);
+    expect(group(view, 'dl1').querySelector('.halo')).toBeNull();
+    expect(group(view, 'dl2').querySelector('.halo')).not.toBeNull();
+  });
+
+  it('draws a dashed ring on unlinked elements, and a red one on a missing device', async () => {
+    const view = await mountView({
+      hass: withImages(),
+      mode: 'link',
+      home: homeResponse({ links: { dl1: LIGHT, dl2: { type: 'entity', id: 'light.gone' } } }),
+    });
+
+    expect(group(view, 'dl1').querySelector('.link-ring')).toBeNull();
+    expect(group(view, 'dl3').querySelector('.link-ring')).not.toBeNull();
+    expect(group(view, 'cur1').querySelector('.link-ring')).not.toBeNull();
+    const missing = group(view, 'dl2').querySelector('.link-ring');
+    expect(missing?.classList.contains('missing')).toBe(true);
+    expect(group(view, 'dl3').querySelector('.link-ring')?.classList.contains('missing')).toBe(false);
+  });
+
+  it('shows no halo and no rings in use mode', async () => {
+    const view = await mountView({
+      hass: withImages(),
+      mode: 'use',
+      selected: ['dl1'],
+      home: homeResponse(),
+    });
+
+    expect(root(view).querySelector('.halo')).toBeNull();
+    expect(root(view).querySelector('.link-ring')).toBeNull();
+  });
 });
 
 describe('zoom and pan', () => {

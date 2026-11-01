@@ -79,3 +79,17 @@ export async function loadImage(hass: HassLike, url: string): Promise<string> {
   if (!response.ok) throw new Error(`Image ${url} answered ${response.status}`);
   return URL.createObjectURL(await response.blob());
 }
+
+/**
+ * Hand a home file to Home Assistant's upload endpoint and return its `file_id`, which
+ * `refreshPreview` takes. Throws when Home Assistant refuses the file.
+ */
+export async function uploadHomeFile(hass: HassLike, file: File): Promise<string> {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await hass.fetchWithAuth('/api/file_upload', { method: 'POST', body: form });
+  if (!response.ok) throw new Error(`Upload answered ${response.status}`);
+  const { file_id: fileId } = (await response.json()) as { file_id?: unknown };
+  if (typeof fileId !== 'string' || !fileId) throw new Error('Upload gave no file id');
+  return fileId;
+}

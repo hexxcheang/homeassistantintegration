@@ -238,6 +238,8 @@ export interface HomeResponse {
   links: Record<string, Link>;
   quick_panel: QuickItem[];
   installer_mode: boolean;
+  /** Where the home came from: fetched from the planner, or loaded from a file. */
+  source: 'planner' | 'file';
   /** Image id to the URL to load it from. */
   image_urls: Record<string, string>;
 }

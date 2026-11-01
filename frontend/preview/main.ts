@@ -116,5 +116,5 @@ plannerFile.addEventListener('change', async () => {
   const pkg = await readHomeFile(plannerFile);
   if (!pkg) return;
   fake.setPlannerPackage(pkg);
-  say(`The pretend planner now has “${pkg.project.title}”. Use Refresh from planner to see what changes.`);
+  say(`The pretend planner now has “${pkg.project.title}”. In the Installer tools, Refresh from planner shows what changes.`);
 });

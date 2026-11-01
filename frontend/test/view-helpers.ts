@@ -1,10 +1,16 @@
 import type { MaxsenFloorplanView } from '../src/floorplan-view.ts';
-import type { HomeResponse, HomePackage, Link, StoredHomePackage } from '../src/types.ts';
+import type { HomeResponse, HomePackage, Link, QuickItem, StoredHomePackage } from '../src/types.ts';
 import { home } from './helpers.ts';
 
 /** The fixture as the integration serves it: no image data, image urls added. */
 export function homeResponse(
-  overrides: { links?: Record<string, Link>; package?: StoredHomePackage | null } = {},
+  overrides: {
+    links?: Record<string, Link>;
+    package?: StoredHomePackage | null;
+    quick_panel?: QuickItem[];
+    installer_mode?: boolean;
+    source?: 'planner' | 'file';
+  } = {},
 ): HomeResponse {
   const { images, ...rest } = home as HomePackage;
   const pkg: StoredHomePackage = {
@@ -14,8 +20,9 @@ export function homeResponse(
   return {
     package: overrides.package === undefined ? pkg : overrides.package,
     links: overrides.links ?? {},
-    quick_panel: [],
-    installer_mode: false,
+    quick_panel: overrides.quick_panel ?? [],
+    installer_mode: overrides.installer_mode ?? false,
+    source: overrides.source ?? 'planner',
     image_urls: Object.fromEntries(Object.keys(images).map((id) => [id, `/api/maxsen/image/e1/${id}`])),
   };
 }

@@ -4,5 +4,7 @@ export * from './visual-state.ts';
 export * from './link-candidates.ts';
 export * from './api.ts';
 export * from './floorplan-view.ts';
+export * from './quick-panel.ts';
+export * from './link-mode.ts';
 export * from './maxsen-home-panel.ts';
 export * from './maxsen-floorplan-card.ts';

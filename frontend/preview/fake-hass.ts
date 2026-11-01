@@ -6,6 +6,7 @@
  */
 import type { HomeEvent } from '../src/api.ts';
 import { LIGHTING_CATEGORIES } from '../src/link-candidates.ts';
+import { PackageProblem, parseHomeFile } from './validate-package.ts';
 import type {
   ChangedDrawing,
   ChangedElement,
@@ -332,8 +333,11 @@ export function createFakeHass(
   /** Scene entity id to the starter scene behind it. */
   let sceneEntities = new Map<string, StarterScene>();
   let installerMode = opts.installerMode;
+  /** Where the home came from: the sample home plays a planner project; an opened file is a file. */
+  let source: HomeResponse['source'] = 'planner';
   let plannerPackage = initial;
-  const files = new Map<string, HomePackage>();
+  /** What `/api/file_upload` kept: uploaded text, checked when previewed as the integration does. */
+  const files = new Map<string, HomePackage | string>();
   const previews = new Map<string, Preview>();
   let counter = 0;
   const listeners = new Set<() => void>();
@@ -443,6 +447,7 @@ export function createFakeHass(
       links,
       quick_panel: quickPanel,
       installer_mode: installerMode,
+      source,
       image_urls: Object.fromEntries(
         Object.keys(pkg.images).map((id) => [id, `/api/maxsen/image/${ENTRY_ID}/${id}`]),
       ),
@@ -541,8 +546,16 @@ export function createFakeHass(
     requireHome(msg);
     requireInstaller('Refreshing');
     const fileId = msg['file_id'];
-    const next = fileId === undefined ? plannerPackage : nonEmpty(fileId) ? files.get(fileId) : undefined;
-    if (!next) throw new CommandError('invalid_package', 'That file is no longer available');
+    let next: HomePackage;
+    if (fileId !== undefined) {
+      const file = nonEmpty(fileId) ? files.get(fileId) : undefined;
+      if (file === undefined) throw new CommandError('invalid_package', 'That file is no longer available');
+      next = typeof file === 'string' ? readUploaded(file) : file;
+    } else if (source === 'planner') {
+      next = plannerPackage;
+    } else {
+      throw new CommandError('invalid_package', 'Choose the file to refresh from');
+    }
     pruneExpired();
     const summary = diff(pkg, next);
     const previewId = `preview-${++counter}`;
@@ -578,6 +591,36 @@ export function createFakeHass(
     commit(world);
     emit('home');
     return { preview_id: previewId, ...structuredClone(preview.summary) };
+  }
+
+  /** Parse an uploaded home as the integration does, with its words for what is wrong. */
+  function readUploaded(text: string): HomePackage {
+    let parsed: HomePackage;
+    try {
+      parsed = parseHomeFile(text);
+    } catch (error) {
+      if (error instanceof PackageProblem) {
+        throw new CommandError('invalid_package', `The home was rejected: ${error.reason}`);
+      }
+      throw error;
+    }
+    if (parsed.project.id !== pkg.project.id) {
+      throw new CommandError('invalid_package', 'This home file is for a different project.');
+    }
+    return parsed;
+  }
+
+  /** Home Assistant's `POST /api/file_upload`: keeps the `file` of a multipart form, answers `{file_id}`. */
+  async function handleUpload(init?: RequestInit): Promise<Response> {
+    if (init?.method !== 'POST') return new Response(null, { status: 404 });
+    const file = init.body instanceof FormData ? init.body.get('file') : null;
+    if (!(file instanceof Blob)) return new Response(null, { status: 400 });
+    const id = `file-${++counter}`;
+    files.set(id, await file.text());
+    return new Response(JSON.stringify({ file_id: id }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
   }
 
   async function callWS<T>(msg: Message): Promise<T> {
@@ -629,7 +672,8 @@ export function createFakeHass(
         return () => void subscribers.delete(subscriber);
       },
     },
-    async fetchWithAuth(path: string): Promise<Response> {
+    async fetchWithAuth(path: string, init?: RequestInit): Promise<Response> {
+      if (path === '/api/file_upload') return handleUpload(init);
       const match = /^\/api\/maxsen\/image\/([^/?#]+)\/([^/?#]+)$/.exec(path.split('?', 1)[0] ?? '');
       const image = match?.[1] === ENTRY_ID ? pkg.images[match[2] ?? ''] : undefined;
       if (!image) return new Response(null, { status: 404 });
@@ -657,6 +701,7 @@ export function createFakeHass(
       const nextLinks = provision(world, next, () => true);
       pkg = next;
       stored = nextStored;
+      source = 'file';
       plannerPackage = next;
       links = nextLinks;
       quickPanel = [];

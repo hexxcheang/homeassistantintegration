@@ -523,6 +523,73 @@ describe('createFakeHass: refresh', () => {
   });
 });
 
+describe('createFakeHass: where the home came from', () => {
+  const upload = (fake: FakeHass, body: BodyInit | null, init: RequestInit = { method: 'POST' }) =>
+    fake.fetchWithAuth('/api/file_upload', { ...init, body });
+  const formWith = (text: string, name = 'home.json'): FormData => {
+    const form = new FormData();
+    form.append('file', new File([text], name, { type: 'application/json' }));
+    return form;
+  };
+
+  it('reports source: planner for the sample home and file once a file was opened', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    expect((await getHome(fake)).source).toBe('planner');
+    fake.openHome(fresh());
+    expect((await getHome(fake)).source).toBe('file');
+  });
+
+  it('needs a file to refresh from once the home came from a file', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    fake.openHome(fresh());
+    await expect(ws(fake, { type: 'maxsen/refresh/preview' })).rejects.toMatchObject({
+      code: 'invalid_package',
+      message: 'Choose the file to refresh from',
+    });
+  });
+
+  it('accepts a multipart upload at /api/file_upload and gives back a file_id', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const response = await upload(fake, formWith(JSON.stringify(changedPackage())));
+    expect(response.status).toBe(200);
+    const { file_id } = (await response.json()) as { file_id: string };
+    expect(file_id).toEqual(expect.any(String));
+
+    const summary = await ws<RefreshSummary>(fake, { type: 'maxsen/refresh/preview', file_id });
+    expect(ids(summary.removed)).toEqual(['dl1', 'sw1']);
+    expect(ids(summary.added)).toEqual(['dl9']);
+  });
+
+  it('refuses an upload that is not a POST with a file', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    expect((await upload(fake, formWith('{}'), { method: 'GET' })).status).toBe(404);
+    expect((await upload(fake, null)).status).toBe(400);
+    expect((await upload(fake, new FormData())).status).toBe(400);
+  });
+
+  it('rejects an uploaded file that is not a home, in the integration words', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const { file_id } = (await (await upload(fake, formWith('not json'))).json()) as { file_id: string };
+    await expect(ws(fake, { type: 'maxsen/refresh/preview', file_id })).rejects.toMatchObject({
+      code: 'invalid_package',
+      message: 'The home was rejected: invalid_json',
+    });
+  });
+
+  it('rejects an uploaded home for a different project', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const other = fresh();
+    other.project = { id: 'someone-else', title: 'Other' };
+    const { file_id } = (await (await upload(fake, formWith(JSON.stringify(other)))).json()) as {
+      file_id: string;
+    };
+    await expect(ws(fake, { type: 'maxsen/refresh/preview', file_id })).rejects.toMatchObject({
+      code: 'invalid_package',
+      message: 'This home file is for a different project.',
+    });
+  });
+});
+
 describe('createFakeHass: starter scenes', () => {
   type Created = { scenes: { id: string; name: string; entity_ids: string[] }[] };
 

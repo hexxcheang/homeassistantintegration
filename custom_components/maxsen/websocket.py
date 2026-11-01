@@ -103,7 +103,7 @@ def _installer_only(
 def ws_home(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Return the home for the card: package, links, quick panel and image URLs."""
+    """Return the home for the card: package, links, quick panel, where it came from and image URLs."""
     if (entry := _loaded_entry_or_error(hass, connection, msg)) is None:
         return
     data = entry.runtime_data.data
@@ -116,6 +116,7 @@ def ws_home(
             "links": data["links"],
             "quick_panel": data["quick_panel"],
             "installer_mode": bool(entry.options.get(CONF_INSTALLER_MODE, False)),
+            "source": entry.data[CONF_SOURCE],
             "image_urls": {
                 image_id: image_url(entry.entry_id, image_id) for image_id in image_ids
             },

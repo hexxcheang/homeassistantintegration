@@ -58,6 +58,7 @@ async def test_home_returns_the_package_without_image_data(
     assert result["links"] == {}
     assert result["quick_panel"] == []
     assert result["installer_mode"] is True
+    assert result["source"] == "file"
     assert result["image_urls"] == {
         "file-l1": f"/api/maxsen/image/{entry.entry_id}/file-l1",
         "file-l2": f"/api/maxsen/image/{entry.entry_id}/file-l2",

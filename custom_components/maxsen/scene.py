@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.components.climate import (
+    ATTR_HVAC_MODE,
+    ATTR_HVAC_MODES,
+    ClimateEntityFeature,
+    HVACMode,
+)
+from homeassistant.components.fan import FanEntityFeature
 from homeassistant.components.scene import Scene
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import ATTR_ENTITY_ID, ATTR_SUPPORTED_FEATURES, Platform
+from homeassistant.core import HomeAssistant, split_entity_id
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -28,6 +37,9 @@ if TYPE_CHECKING:
 SWITCHABLE_DOMAINS = frozenset({"light", "switch", "fan", "climate"})
 
 type StarterScene = dict[str, Any]
+type ServiceCall = tuple[str, str, dict[str, Any]]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _resolve_link(
@@ -122,17 +134,76 @@ class MaxsenStarterScene(Scene):
         """List the members, as Home Assistant's own scenes do."""
         return {"entity_id": self._entity_ids}
 
+    def _off_call(self, entity_id: str) -> ServiceCall | None:
+        """How to turn off one aircon or fan, or None when it cannot be turned off.
+
+        ``homeassistant.turn_off`` makes one call per domain, and Home Assistant
+        rejects that whole call when one of its climate or fan entities lacks
+        TURN_OFF, so these are turned off one by one.
+        """
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None
+        features = state.attributes.get(ATTR_SUPPORTED_FEATURES, 0) or 0
+        domain = split_entity_id(entity_id)[0]
+        if domain == "fan":
+            if features & FanEntityFeature.TURN_OFF:
+                return ("fan", "turn_off", {ATTR_ENTITY_ID: entity_id})
+            return None
+        if features & ClimateEntityFeature.TURN_OFF:
+            return ("climate", "turn_off", {ATTR_ENTITY_ID: entity_id})
+        if HVACMode.OFF in (state.attributes.get(ATTR_HVAC_MODES) or []):
+            return (
+                "climate",
+                "set_hvac_mode",
+                {ATTR_ENTITY_ID: entity_id, ATTR_HVAC_MODE: HVACMode.OFF},
+            )
+        return None
+
     async def async_activate(self, **kwargs: Any) -> None:
-        """Turn the members off."""
-        if not self._entity_ids:
+        """Turn the members off.
+
+        Lights and switches go in one ``homeassistant.turn_off``; each aircon and
+        fan gets its own call. The calls run side by side, so one failure does
+        not stop the others; failures and members that cannot be turned off are
+        logged, not raised.
+        """
+        plain: list[str] = []
+        calls: list[ServiceCall] = []
+        for entity_id in self._entity_ids:
+            if split_entity_id(entity_id)[0] not in ("climate", "fan"):
+                plain.append(entity_id)
+            elif (call := self._off_call(entity_id)) is not None:
+                calls.append(call)
+            else:
+                _LOGGER.warning(
+                    "%s: %s cannot be turned off, so it was left as it is",
+                    self.name,
+                    entity_id,
+                )
+        if plain:
+            calls.insert(0, ("homeassistant", "turn_off", {ATTR_ENTITY_ID: plain}))
+        if not calls:
             return
-        await self.hass.services.async_call(
-            "homeassistant",
-            "turn_off",
-            {"entity_id": self._entity_ids},
-            blocking=True,
-            context=self._context,
+        results = await asyncio.gather(
+            *(
+                self.hass.services.async_call(
+                    domain, service, data, blocking=True, context=self._context
+                )
+                for domain, service, data in calls
+            ),
+            return_exceptions=True,
         )
+        for (domain, service, data), result in zip(calls, results, strict=True):
+            if isinstance(result, Exception):
+                _LOGGER.warning(
+                    "%s: %s.%s for %s failed: %s",
+                    self.name,
+                    domain,
+                    service,
+                    data[ATTR_ENTITY_ID],
+                    result,
+                )
 
 
 async def async_setup_entry(

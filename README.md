@@ -69,7 +69,9 @@ Do this on site, signed in to Home Assistant as an administrator.
    - The line at the top counts what is left ("3 not linked yet") and says "Everything is linked."
      when you are done.
 4. **Create starter scenes.** Makes "All off", one "All off – (level name)" per level and
-   "All lights off", and puts them on the quick panel.
+   "All lights off", and puts them on the quick panel. An aircon that has no off switch is set
+   to its Off mode instead; one with neither, or a fan with no off switch, is left as it is and
+   named in the Home Assistant log. The rest still turn off.
 5. Optional: tap **Done**, then **Edit** on the quick panel to choose which scenes and elements
    appear on it, and in what order.
 6. **A non-admin user for each wall panel.** **Settings**, **People**, **Add person**; switch on

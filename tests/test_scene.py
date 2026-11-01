@@ -10,7 +10,10 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.maxsen.const import DOMAIN
 from custom_components.maxsen.scene import MaxsenStarterScene, build_starter_scenes
+from homeassistant.components.climate import ClimateEntityFeature
+from homeassistant.components.fan import FanEntityFeature
 from homeassistant.const import EntityCategory
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
@@ -266,6 +269,103 @@ async def test_activating_turns_the_members_off(hass, hass_ws_client, entry):
     )
 
     assert [call.data for call in turn_off] == [{"entity_id": ["switch.l1_gang2"]}]
+
+
+def activatable(hass, entry, entity_ids) -> MaxsenStarterScene:
+    scene = MaxsenStarterScene(
+        entry.entry_id, {"id": "all_off", "name": "All off", "entity_ids": entity_ids}
+    )
+    scene.hass = hass
+    return scene
+
+
+async def test_activating_turns_off_aircons_with_and_without_turn_off(hass, entry):
+    """homeassistant.turn_off fails for every aircon when one lacks TURN_OFF; set off mode instead."""
+    hass.states.async_set(
+        "climate.ac_new",
+        "cool",
+        {
+            "supported_features": ClimateEntityFeature.TURN_OFF
+            | ClimateEntityFeature.TARGET_TEMPERATURE,
+            "hvac_modes": ["off", "cool"],
+        },
+    )
+    hass.states.async_set(
+        "climate.ac_old",
+        "cool",
+        {
+            "supported_features": ClimateEntityFeature.TARGET_TEMPERATURE,
+            "hvac_modes": ["off", "cool"],
+        },
+    )
+    hass.states.async_set("switch.gang", "on")
+    turn_off = async_mock_service(hass, "homeassistant", "turn_off")
+    climate_off = async_mock_service(hass, "climate", "turn_off")
+    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
+
+    await activatable(
+        hass, entry, ["climate.ac_new", "climate.ac_old", "switch.gang"]
+    ).async_activate()
+
+    assert [c.data for c in turn_off] == [{"entity_id": ["switch.gang"]}]
+    assert [c.data for c in climate_off] == [{"entity_id": "climate.ac_new"}]
+    assert [c.data for c in set_mode] == [
+        {"entity_id": "climate.ac_old", "hvac_mode": "off"}
+    ]
+
+
+async def test_activating_skips_what_cannot_be_turned_off_with_a_log(
+    hass, entry, caplog
+):
+    hass.states.async_set("fan.old", "on", {"supported_features": 0})
+    hass.states.async_set(
+        "fan.new", "on", {"supported_features": FanEntityFeature.TURN_OFF}
+    )
+    hass.states.async_set(
+        "climate.heat_only", "heat", {"supported_features": 0, "hvac_modes": ["heat"]}
+    )
+    hass.states.async_set("light.lamp", "on")
+    turn_off = async_mock_service(hass, "homeassistant", "turn_off")
+    fan_off = async_mock_service(hass, "fan", "turn_off")
+    climate_off = async_mock_service(hass, "climate", "turn_off")
+    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
+
+    await activatable(
+        hass, entry, ["fan.old", "fan.new", "climate.heat_only", "light.lamp"]
+    ).async_activate()
+
+    assert [c.data for c in turn_off] == [{"entity_id": ["light.lamp"]}]
+    assert [c.data for c in fan_off] == [{"entity_id": "fan.new"}]
+    assert climate_off == []
+    assert set_mode == []
+    assert "fan.old" in caplog.text
+    assert "climate.heat_only" in caplog.text
+
+
+async def test_one_failed_call_does_not_stop_the_others(hass, entry, caplog):
+    hass.states.async_set(
+        "climate.ac", "cool", {"supported_features": ClimateEntityFeature.TURN_OFF}
+    )
+    hass.states.async_set(
+        "fan.ceiling", "on", {"supported_features": FanEntityFeature.TURN_OFF}
+    )
+    hass.states.async_set("switch.gang", "on")
+
+    async def broken(call):
+        raise HomeAssistantError("aircon offline")
+
+    hass.services.async_register("climate", "turn_off", broken)
+    turn_off = async_mock_service(hass, "homeassistant", "turn_off")
+    fan_off = async_mock_service(hass, "fan", "turn_off")
+
+    await activatable(
+        hass, entry, ["climate.ac", "fan.ceiling", "switch.gang"]
+    ).async_activate()
+
+    assert [c.data for c in turn_off] == [{"entity_id": ["switch.gang"]}]
+    assert [c.data for c in fan_off] == [{"entity_id": "fan.ceiling"}]
+    assert "climate.ac" in caplog.text
+    assert "aircon offline" in caplog.text
 
 
 async def test_a_scene_with_no_members_calls_nothing(hass, entry):

@@ -71,6 +71,43 @@ server-enforced as today).
 **Walk order:** level by level, then by position, top to bottom and left to right on the drawing.
 Lights come after the switches of the same level. Skipped markers come back at the end.
 
+## Decisions from the builder check *(Claude's calls; the owner can override)*
+
+1. **Lights are linked in groups the installer confirms.**
+   - The walk highlights one unlinked light marker and asks "Press the gang that turns this on".
+   - The first matching gang that turns **on** (off → on) is linked to that marker.
+   - The prompt then changes to "Tap the other lights that came on". The installer taps the lit
+     markers they can see and confirms, and all of them are linked to the same gang.
+   - The unit of work, Skip and Undo all apply to that group.
+   - One press per room or circuit, not one per downlight.
+2. **"Turn every gang off first" is a prompt**, not an app action. The app never switches loads on
+   or off by itself during the walk. Only an off → on change counts as a light press.
+3. **Maxsen remembers what it named.**
+   - The store records, per device, the name and area Maxsen wrote plus the previous `name_by_user`
+     and `area_id`.
+   - A device counts as "named by a person" when it has a `name_by_user` that Maxsen did not write.
+     Such devices are never renamed. The same rule applies to the area.
+   - Links are saved immediately.
+   - **Undo** removes the link and restores the previous name and area.
+   - **Wrong** in Check all does the same, then puts the marker back in the walk queue.
+4. **Naming applies to device links only**: switches, control panels, curtains, sensors, aircon,
+   locks, cameras.
+   - Light-to-gang entity links never rename anything.
+   - Format: `‹Level› – ‹marker label, else product name›`, e.g. "Level 1 – Entrance switch".
+   - The area is the level name.
+   - Duplicate names get " 2", " 3" and so on.
+   - Manual links (tap a marker, then pick) and list-picked devices use the same rule.
+5. **Only Zigbee devices count.** Presses count only from devices whose config entry is
+   `mqtt` (Zigbee2MQTT) or `zha`. An **Include other devices** switch in the walk lifts this for
+   unusual installs. Light gangs follow the same rule.
+6. **Check all** goes through, one at a time:
+   - each distinct gang entity that lights are linked to;
+   - each primary switch/light entity of linked switch devices (per gang);
+   - each linked curtain (open briefly, then stop and return).
+
+   Each one is turned to the opposite state for 2 s, then restored to its previous state. Climate,
+   locks, cameras and sensors are skipped.
+
 ## Where the logic lives
 
 - **Server (Python):**

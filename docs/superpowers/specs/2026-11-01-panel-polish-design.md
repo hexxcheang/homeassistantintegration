@@ -1,7 +1,7 @@
 # Maxsen Home: Wall Panel Polish (short design)
 
 Date: 2026-11-01
-Status: Draft, awaiting approval
+Status: Approved 2026-11-01
 Builds on: `2026-11-01-maxsen-floorplan-dashboard-design.md`
 
 ## Why

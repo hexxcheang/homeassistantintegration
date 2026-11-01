@@ -1,7 +1,165 @@
 # Maxsen Home
 
-A Home Assistant integration that puts a Maxsen Planner home drawing on your dashboard: the floor
-plan with every light, switch, curtain and sensor on it, live and tappable.
+## What it is
+
+Maxsen Home puts the home drawing from the Maxsen Planner on a Home Assistant dashboard: the floor
+plan of each level with every light, switch, curtain and sensor on it, live and tappable. The
+installer links each item on the drawing to its device in Home Assistant once; after that the
+customer taps the drawing to use the home. It also has a quick panel of favourite buttons and a set
+of starter scenes such as "All off".
+
+You get a **Home** item in the Home Assistant sidebar, and a dashboard card for the same drawing.
+
+**You need**
+
+- Home Assistant 2025.1 or newer.
+- [HACS](https://hacs.xyz) installed in that Home Assistant.
+- A home from the Maxsen Planner: a pairing code, or a home file (see *Add the integration*).
+
+The planner's side of the pairing (the **Home Assistant** button in a project) comes with the
+planner change hexxcheang/maxsen-planner#25. Until that is merged and deployed, pairing does not
+work; use a home file instead.
+
+## Install with HACS
+
+1. In Home Assistant open **HACS**.
+2. Open the three-dot menu at the top right and choose **Custom repositories**.
+3. In **Repository** enter `https://github.com/hexxcheang/homeassistantintegration`. In **Type**
+   (or **Category**) choose **Integration**. Tap **Add**.
+4. Find **Maxsen Home** in the HACS list, open it and tap **Download**.
+5. Restart Home Assistant (**Settings**, **System**, power button, **Restart Home Assistant**).
+
+## Add the integration
+
+1. Go to **Settings**, **Devices & services**, **Add integration** and search for **Maxsen Home**.
+2. Choose how to bring in the home:
+   - **Pair with the Maxsen Planner** (normal way). In the planner, open the project and tap
+     **Home Assistant** in the top bar, then **Create pairing code**. Back in Home Assistant, enter
+     the **Planner address** (starts with `https://`) and the **Pairing code**. The code works
+     once and runs out after 24 hours. The project must be saved to the team first.
+   - **Upload a home file** (when there is no pairing yet, or no internet at the site). In the
+     planner's **Home Assistant** dialog tap **Download home file**, then choose that `.json`
+     file here.
+3. The **Home** item appears in the sidebar. The drawing is there, but nothing is linked yet.
+
+One project can be added once. A home set up from a file is updated by uploading a newer file (see
+*Updating the home*).
+
+To put the drawing on a dashboard as well: **Edit dashboard**, **Add card**, **Maxsen floor plan**.
+In YAML it is `type: custom:maxsen-floorplan-card`.
+
+## Installer checklist
+
+Do this on site, signed in to Home Assistant as an administrator.
+
+1. **Installer mode on.** **Settings**, **Devices & services**, **Maxsen Home**, **Configure**,
+   switch **Installer mode** on, **Submit**. Without it the installer tools stay hidden and the
+   server refuses them, even for administrators.
+2. Open **Home** in the sidebar. Tap **Installer**.
+3. **Link devices.** Tap an element on the drawing, then tap the device (or, for lights, the light
+   or switch) it belongs to in the list. Use **Search by name or room** to find it. The element
+   stops being dashed. **Unlink** takes a link away.
+   - **Select several** links a group in one go: for example tap all the downlights on one wall
+     switch, then tap that switch. Pick lights together, or other devices together, not both.
+   - Elements that are not shown on the drawing are under **Not on the drawing**. Tap one there
+     to pick it.
+   - The line at the top counts what is left ("3 not linked yet") and says "Everything is linked."
+     when you are done.
+4. **Create starter scenes.** Makes "All off", one "All off – (level name)" per level and
+   "All lights off", and puts them on the quick panel.
+5. Optional: tap **Done**, then **Edit** on the quick panel to choose which scenes and elements
+   appear on it, and in what order.
+6. **A non-admin user for each wall panel.** **Settings**, **People**, **Add person**; switch on
+   **Allow person to login**, give it a name and password, and leave **Administrator** off. Use
+   one per panel so you can remove a panel's access later.
+7. **Installer mode off at handover.** Same place as step 1. Customers (and the wall panels) can
+   still use the drawing and the quick panel; only the installer tools go away.
+
+Unlinked elements are drawn greyed and do nothing when tapped. Elements whose device was deleted in
+Home Assistant show "Missing device": link them again.
+
+## Android wall panels
+
+Use a non-admin user (checklist step 6), never an administrator.
+
+- **Home Assistant Companion app:** install it from Google Play, sign in with the panel's user, and
+  open **Home** from the sidebar.
+- **Or a kiosk browser:** open `http://<home-assistant-address>:8123/maxsen-home` (the address
+  you use for Home Assistant, ending in `/maxsen-home`) and sign in as the panel's user. A kiosk
+  app that keeps the screen on and remembers the sign-in works best.
+
+The panel switches between a wide layout (drawing with the quick panel beside it) and a phone
+layout (quick panel under the drawing) by itself.
+
+## Updating the home after planner changes
+
+When the drawing or devices change in the planner, save the project to the team in the planner,
+then in Home Assistant (installer mode on, signed in as administrator):
+
+1. **Home**, **Installer**, **Refresh from planner**.
+2. Read the summary, for example "2 new devices to link, 1 device removed, 1 drawing updated", with
+   the lists **New devices**, **Removed devices** and **Updated drawings**.
+3. Tap **Apply** to update the home, or **Cancel** to leave it as it is. "Nothing has changed."
+   means there is nothing to apply.
+4. Link the new devices (checklist step 3). Links for removed devices are tidied up by the refresh.
+
+It only refreshes when you ask; Home Assistant never checks the planner by itself. For a home set
+up from a file the button is **Choose a newer home file**: download the new file from the planner
+and pick it. The file must be from the same project.
+
+## Disconnecting
+
+In the planner, open the project's **Home Assistant** dialog and tap **Disconnect** next to the
+connection (staff do this). The next time someone taps **Refresh from planner**, Home Assistant
+shows "Connection revoked: ask Maxsen for a new pairing code". The drawing, links, quick panel
+and scenes keep working as they are; only refreshing stops.
+
+To connect again, create a new pairing code. The integration cannot yet take a new code for a home
+it already has, so remove **Maxsen Home** in **Settings**, **Devices & services** and add it again.
+That clears the links, so link the devices again afterwards.
+
+## Troubleshooting
+
+What the integration says, and what to do:
+
+| Message | What to do |
+| --- | --- |
+| That code did not work. Check it, or create a new one in the planner. | Check the characters. A code works once and runs out after 24 hours; create a new one. |
+| Too many tries. Wait a minute and try again. | Wait, then try again. |
+| Could not reach the planner. Check the address and your connection. | Check the **Planner address** and that Home Assistant has internet. |
+| Enter the planner address starting with https:// | Use the full address, for example `https://planner.example.com`. Plain `http://` is accepted only for `localhost`. |
+| The planner has no home to send yet: … | Follow the planner's message, usually "Save this project to the team first." |
+| This is not a Maxsen home file. | Use the file from the planner's **Download home file**, not another `.json`. |
+| This home file is from a newer planner. Update this integration. | In HACS update **Maxsen Home**, restart Home Assistant. |
+| This file is larger than 100 MB. | Ask Maxsen. |
+| This home is already added. | That project is already in Home Assistant. Open **Home**. |
+| Connection revoked: ask Maxsen for a new pairing code | See *Disconnecting*. |
+| The planner is busy. Try again in 15 minutes. | Wait, then **Refresh from planner** again. |
+| Can't reach the planner | Check the internet connection. The home keeps working meanwhile. |
+| Refreshing needs an administrator and installer mode | Sign in as an administrator and switch **Installer mode** on. |
+| The preview expired. Preview again. | Tap **Refresh from planner** again. |
+| This home file is for a different project. | Pick the file of this home's project. |
+| The home could not be saved. Remove this home and add it again. | Remove **Maxsen Home** and add it again. |
+| Maxsen Home is not set up yet. Add it under Settings, Devices & services. | Add the integration (above). |
+
+If the **Installer** button is missing: you are not an administrator, or **Installer mode** is off.
+If an element does nothing when tapped: it is not linked yet (installer step 3).
+
+## For developers
+
+Everything here is for people changing the code; installers can skip it.
+
+- **Python tests** (from the repository folder): `python3 -m venv .venv`, then
+  `.venv/bin/pip install -r requirements_test.txt`, then `.venv/bin/pytest -q`.
+- **Frontend tests**: `cd frontend && npm install && npm test`. `npm run typecheck` checks the types.
+- **Build the bundle**: `cd frontend && npm run build`. This writes
+  `custom_components/maxsen/frontend/maxsen-home.js`, which is committed so HACS installs it with
+  the integration. Commit the rebuilt bundle with any change to `frontend/src`; CI fails if it is
+  out of date.
+- **Preview app**: run the real panel on your Mac with a simulated Home Assistant. See the next
+  section.
+- **Release**: the version is in `custom_components/maxsen/manifest.json` (`0.1.0`) and must match
+  the GitHub release tag (`v0.1.0`). A person creates the tag after a test on real hardware.
 
 ## See it on your Mac
 

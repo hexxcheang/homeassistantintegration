@@ -268,6 +268,15 @@ export interface HassArea {
   name: string;
 }
 
+/** The websocket connection on the Home Assistant frontend's `hass` object. */
+export interface HassConnection {
+  /** Resolves to the function that ends the subscription. */
+  subscribeMessage<T>(
+    callback: (message: T) => void,
+    subscribeMessage: { type: string; [key: string]: unknown },
+  ): Promise<() => void>;
+}
+
 export interface HassLike {
   states: Record<string, HassState>;
   entities: Record<string, HassEntity>;
@@ -281,4 +290,24 @@ export interface HassLike {
     target?: Record<string, unknown>,
   ): Promise<unknown>;
   callWS<T>(message: { type: string; [key: string]: unknown }): Promise<T>;
+  connection: HassConnection;
+  /** `fetch` with the user's access token added; `path` is relative to Home Assistant. */
+  fetchWithAuth(path: string, init?: RequestInit): Promise<Response>;
+}
+
+// ---- Refresh and starter scenes (custom_components/maxsen/websocket.py) ----
+
+/** An element named in a refresh summary, with what the installer needs to recognise it. */
+export interface ChangedElement {
+  id: string;
+  productName: string;
+  label: string;
+}
+
+/** What `maxsen/refresh/preview` and `maxsen/refresh/apply` report. */
+export interface RefreshSummary {
+  preview_id: string;
+  added: ChangedElement[];
+  removed: ChangedElement[];
+  changed_drawings: ChangedElement[];
 }

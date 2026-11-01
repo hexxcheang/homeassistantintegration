@@ -13,12 +13,12 @@ from custom_components.maxsen.store import MaxsenStore
 from homeassistant.config_entries import ConfigEntryState
 
 
-def make_entry(hass) -> MockConfigEntry:
+def make_entry(hass, project_id: str = "proj-test-house") -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
-        unique_id="proj-test-house",
+        unique_id=project_id,
         title="Test House",
-        data={"source": "file", "project_id": "proj-test-house", "title": "Test House"},
+        data={"source": "file", "project_id": project_id, "title": "Test House"},
         options={"installer_mode": True},
     )
     entry.add_to_hass(hass)
@@ -135,3 +135,63 @@ async def test_removing_an_entry_without_saved_files_is_fine(hass):
     assert not folder.exists()
 
     assert await hass.config_entries.async_remove(entry.entry_id)
+
+
+# ------------------------------------------------------------ panel and card
+
+
+def panels(hass) -> dict:
+    return hass.data["frontend_panels"]
+
+
+async def test_setup_registers_the_panel_and_serves_the_bundle(hass, hass_client):
+    entry = make_entry(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    panel = panels(hass)["maxsen-home"]
+    assert panel.sidebar_title == "Home"
+    assert panel.sidebar_icon == "mdi:floor-plan"
+    assert panel.require_admin is False
+    custom = panel.config["_panel_custom"]
+    assert custom["name"] == "maxsen-home-panel"
+    assert custom["module_url"] == "/maxsen_static/maxsen-home.js?v=0.1.0"
+
+    # The card loads from the same module on every dashboard.
+    assert "/maxsen_static/maxsen-home.js?v=0.1.0" in hass.data["frontend_extra_module_url"].urls
+
+    client = await hass_client()
+    resp = await client.get("/maxsen_static/maxsen-home.js")
+    assert resp.status == 200
+    assert "maxsen-home-panel" in await resp.text()
+
+
+async def test_the_panel_stays_until_the_last_entry_unloads(hass):
+    first = make_entry(hass, "proj-one")
+    second = make_entry(hass, "proj-two")
+    assert await hass.config_entries.async_setup(first.entry_id)
+    await hass.async_block_till_done()
+    assert second.state is ConfigEntryState.LOADED
+
+    assert await hass.config_entries.async_unload(first.entry_id)
+    assert "maxsen-home" in panels(hass)
+
+    assert await hass.config_entries.async_unload(second.entry_id)
+    assert "maxsen-home" not in panels(hass)
+
+    # Setting an entry up again brings the panel back, once.
+    assert await hass.config_entries.async_setup(first.entry_id)
+    assert "maxsen-home" in panels(hass)
+    assert await hass.config_entries.async_setup(second.entry_id)
+    assert "maxsen-home" in panels(hass)
+
+
+async def test_a_failed_setup_does_not_leave_a_panel(hass, home_package):
+    entry = make_entry(hass)
+    hass.data.setdefault(DOMAIN, {}).setdefault("pending", {})[
+        "proj-test-house"
+    ] = home_package
+    with patch("custom_components.maxsen.save_images", side_effect=OSError("disk full")):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+
+    assert "maxsen-home" not in panels(hass)

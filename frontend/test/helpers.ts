@@ -54,5 +54,7 @@ export function makeHass(init: HassInit = {}): HassLike {
     user: { is_admin: true },
     callService: async () => undefined,
     callWS: async () => undefined as never,
+    connection: { subscribeMessage: async () => () => undefined },
+    fetchWithAuth: async () => new Response(null, { status: 404 }),
   };
 }

@@ -59,7 +59,7 @@ export interface HomeElement {
   kind: 'point' | 'led-strip' | 'track' | 'curtain';
   productName: string;
   variantName: string;
-  label: string;                 // '' when none or when showLabels is off
+  label: string;                 // '' only when the element has none; kept even when showLabels is off (scene labels follow showLabels)
   drawn: boolean;                // false when its category is hidden in the export settings
 }
 ```
@@ -97,7 +97,7 @@ export interface HomeElement {
   - Two plans with the same sourcePage/rotation/crop share `background.key`. `imageIds` lists each fileId once.
   - An element in a `hiddenCategories` category is in `elements` with `drawn: false` and has no item in `scene.items`.
   - `includeNotes: false` → no `type: 'note'` items and no notes in `elements`; `includeNotes: true` → notes drawn.
-  - `showLabels: false` → every `label === ''`.
+  - `showLabels: false` → no label items in `scene`, but `elements` keep their labels (changed after the final review: the spec says element labels are kept).
   - **Privacy (Review Focus 5):** the fixture has `customerName: 'Tan Ah Kow'`, `customerContact: '+65 9123 4567'`, `propertyAddress: '12 Jalan Leak'`, an invoice `priceEdits` entry and a note `'$1,200 extra wiring'`. `JSON.stringify(pkg)` contains none of `Tan Ah Kow`, `9123`, `Jalan Leak`, `$1,200`, `priceEdits`, `billing`.
 - [ ] **Step 3: Run** `pnpm --filter @maxsen/domain test`. Expected: the new tests FAIL (modules missing).
 - [ ] **Step 4: Implement** `catalogueResolver`, `buildHomePackage` and the types. `buildScene` options come from `exportSettings.floorPlan`, with `showNotes: opts.includeNotes`. Repoint web `resolverFor` to `catalogueResolver`.

@@ -1,8 +1,10 @@
 import { LitElement, css, html, nothing, svg, type SVGTemplateResult, type TemplateResult } from 'lit';
 import { classMap } from 'lit/directives/class-map.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
+import { styleMap } from 'lit/directives/style-map.js';
 import { loadImage } from './api.ts';
 import { domainOf } from './hass-util.ts';
+import { elementsAt, type HitItem } from './hit-test.ts';
 import { CONTROLLABLE, linkEntityIds, primaryEntity, toggleEntities } from './operate.ts';
 import { LIGHTING_CATEGORIES } from './link-candidates.ts';
 import { sceneToSvg, type SvgNode } from './scene-svg.ts';
@@ -15,7 +17,7 @@ import type {
   Link,
   SceneItem,
 } from './types.ts';
-import { contentBox, layerOptions, type Box, type Layer } from './view-geometry.ts';
+import { contentBox, layerOptions, placeInside, type Box, type Layer } from './view-geometry.ts';
 import { visualState, type VisualState } from './visual-state.ts';
 
 export type ViewMode = 'use' | 'link';
@@ -30,6 +32,13 @@ const MAX_ZOOM = 6;
 /** Every marker can be hit within this many CSS px of its centre (44 px across) at default zoom. */
 const HIT_RADIUS_PX = 22;
 const NOTICE_MS = 4000;
+/** The picker for overlapping devices: a fixed width, rows of 48 px (never under 44), and 4 px of padding. */
+const PICKER_WIDTH = 280;
+const PICKER_ROW = 48;
+const PICKER_PADDING = 4;
+/** Space kept between the picker and the edge of the drawing, and between it and the tap. */
+const PICKER_MARGIN = 8;
+const PICKER_GAP = 14;
 /** Used until the stage has been measured, and in environments without layout. */
 const FALLBACK_STAGE = { w: 800, h: 600 };
 
@@ -39,6 +48,17 @@ const GLOWING = new Set<string>([...LIGHTING_CATEGORIES, 'smart-switches']);
 const PILLED = new Set<string>(['sensors', 'aircon-controllers', 'curtains-blinds', 'smart-locks']);
 
 const LAYER_LABELS: Record<Layer, string> = { all: 'All', 'smart-home': 'Smart Home', lighting: 'Lighting' };
+
+/** What a picker row says when the device has no reading of its own to show. */
+const STATUS_TEXT: Record<VisualState['status'], string> = {
+  unlinked: 'Not linked',
+  missing: 'Device missing',
+  unavailable: 'Unavailable',
+  on: 'On',
+  off: 'Off',
+  alert: 'Alert',
+  idle: 'Idle',
+};
 
 /** Each view names its own soft-background filter: several cards can share one dashboard page. */
 let softFilterCount = 0;
@@ -61,11 +81,21 @@ function sceneNodes(plan: HomePlan): SvgNode[] {
 
 interface Press {
   id: number;
-  elementId: string | undefined;
+  /** Every element whose touch area held the press, nearest first. */
+  hits: string[];
   x: number;
   y: number;
   moved: boolean;
   long: boolean;
+}
+
+/** Overlapping devices at a tap, to choose from. A hold on them opens details; a tap acts as a tap. */
+interface Picker {
+  /** Where the tap was, in stage px. */
+  x: number;
+  y: number;
+  ids: string[];
+  intent: 'tap' | 'details';
 }
 
 interface Popup {
@@ -90,6 +120,7 @@ export class MaxsenFloorplanView extends LitElement {
     _images: { state: true },
     _stage: { state: true },
     _popup: { state: true },
+    _picker: { state: true },
     _notice: { state: true },
   };
 
@@ -107,6 +138,7 @@ export class MaxsenFloorplanView extends LitElement {
   declare private _images: ReadonlyMap<string, string>;
   declare private _stage: { w: number; h: number };
   declare private _popup: Popup | undefined;
+  declare private _picker: Picker | undefined;
   declare private _notice: string | undefined;
 
   private _elements = new Map<string, HomeElement>();
@@ -123,6 +155,8 @@ export class MaxsenFloorplanView extends LitElement {
   private _noticeTimer: ReturnType<typeof setTimeout> | undefined;
   private _observer: ResizeObserver | undefined;
   private _observed: Element | undefined;
+  /** Where focus was when the picker opened, to give it back when the picker closes. */
+  private _returnFocus: HTMLElement | undefined;
   private _shownPlans = '';
   private readonly _softFilterId = `maxsen-soft-${++softFilterCount}`;
 
@@ -148,6 +182,7 @@ export class MaxsenFloorplanView extends LitElement {
     super.disconnectedCallback();
     this._dropImages();
     this._cancelHold();
+    this._closePicker(false);
     clearTimeout(this._noticeTimer);
     this._observer?.disconnect();
     this._observer = undefined;
@@ -173,9 +208,13 @@ export class MaxsenFloorplanView extends LitElement {
     if (!levels.some((l) => l.id === this._levelId)) this._levelId = levels[0]?.id;
   }
 
-  override updated(): void {
+  override updated(changed: Map<PropertyKey, unknown>): void {
     this._observeStage();
     this._loadImages();
+    // A picker that has just opened takes focus, so the keyboard works in it from the start.
+    if (this._picker && changed.get('_picker') === undefined && changed.has('_picker')) {
+      this.renderRoot.querySelector<HTMLElement>('.picker .pick')?.focus();
+    }
     // A new level, layer or view box is a new drawing: start it unzoomed.
     const shown = `${this._levelId}|${this._visible().plans.map((p) => p.id).join(',')}|${this._whole}`;
     if (shown !== this._shownPlans) {
@@ -261,6 +300,11 @@ export class MaxsenFloorplanView extends LitElement {
     return { fitted, whole, shown: this._whole ? whole : fitted };
   }
 
+  /** The scene items of what is shown, by element id. */
+  private _items(): Map<string, SceneItem> {
+    return new Map(this._visible().plans.flatMap((p) => p.scene.items.map((i) => [i.elementId, i] as const)));
+  }
+
   private _state(elementId: string): VisualState {
     const el = this._elements.get(elementId);
     if (!el || !this.hass) return { status: 'unlinked' };
@@ -303,10 +347,41 @@ export class MaxsenFloorplanView extends LitElement {
     this._applyView();
   }
 
-  private _elementIdAt(e: Event): string | undefined {
-    const target = (e.composedPath()[0] ?? e.target) as Element | null;
-    const id = target?.closest?.('[data-element-id]')?.getAttribute('data-element-id') ?? undefined;
-    return id !== undefined && this._elements.has(id) ? id : undefined;
+  /**
+   * The touch areas of what is shown, in stage px at the current zoom: a circle of 22 px around a
+   * marker and a 22 px half-width stroke along a line, the same areas the drawing lays over them.
+   * Topmost first, so that of two at the same distance the one drawn on top is listed first. Only
+   * the shown layers are here, and notes and unknown elements are not touchable.
+   */
+  private _touchAreas(): HitItem[] {
+    const { plans } = this._visible();
+    if (plans.length === 0) return [];
+    const box = this._boxes(plans).shown;
+    const stage = this._stageSize();
+    const fit = Math.min(stage.w / box.w, stage.h / box.h);
+    const offX = (stage.w - box.w * fit) / 2;
+    const offY = (stage.h - box.h * fit) / 2;
+    const v = this._view;
+    const px = (x: number) => (offX + (x - box.x) * fit) * v.s + v.x;
+    const py = (y: number) => (offY + (y - box.y) * fit) * v.s + v.y;
+    const hitRadius = HIT_RADIUS_PX * v.s;
+    const areas: HitItem[] = [];
+    for (const plan of plans) {
+      for (const item of plan.scene.items) {
+        if (item.type === 'note' || !this._elements.has(item.elementId)) continue;
+        areas.push(
+          item.type === 'marker'
+            ? { elementId: item.elementId, x: px(item.x), y: py(item.y), hitRadius }
+            : {
+                elementId: item.elementId,
+                points: item.points.map((pt) => ({ x: px(pt.x), y: py(pt.y) })),
+                closed: item.closed,
+                hitRadius,
+              },
+        );
+      }
+    }
+    return areas.reverse();
   }
 
   private _onDown(e: PointerEvent): void {
@@ -319,11 +394,11 @@ export class MaxsenFloorplanView extends LitElement {
       // Not an active pointer (synthetic events); the stage still gets the events it needs.
     }
     if (this._pointers.size === 1) {
-      const elementId = this._elementIdAt(e);
-      const press: Press = { id: e.pointerId, elementId, x: p.x, y: p.y, moved: false, long: false };
+      const hits = elementsAt(p, this._touchAreas());
+      const press: Press = { id: e.pointerId, hits, x: p.x, y: p.y, moved: false, long: false };
       this._press = press;
       this._cancelHold();
-      if (elementId && this.mode === 'use') {
+      if (hits.length > 0 && this.mode === 'use') {
         this._holdTimer = setTimeout(() => this._onHold(press), LONG_PRESS_MS);
       }
     } else if (this._pointers.size === 2) {
@@ -383,6 +458,8 @@ export class MaxsenFloorplanView extends LitElement {
 
   private _onWheel(e: WheelEvent): void {
     e.preventDefault();
+    // The picker is anchored to where the drawing was.
+    this._closePicker();
     const p = this._local(e);
     // Firefox reports lines, not pixels.
     const delta = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
@@ -402,7 +479,8 @@ export class MaxsenFloorplanView extends LitElement {
   // ---- actions ----
 
   private _onTap(press: Press): void {
-    if (!press.elementId) {
+    const [first, ...others] = press.hits;
+    if (first === undefined) {
       // A second tap on the empty drawing puts it back.
       const now = Date.now();
       const last = this._lastTap;
@@ -415,30 +493,72 @@ export class MaxsenFloorplanView extends LitElement {
       }
       return;
     }
-    if (this.mode === 'link') {
-      this.dispatchEvent(
-        new CustomEvent('maxsen-element-tap', {
-          detail: { elementId: press.elementId },
-          bubbles: true,
-          composed: true,
-        }),
-      );
-      return;
-    }
-    this._operate(press.elementId);
+    // Several devices under the finger: never guess which one was meant.
+    if (others.length > 0) this._openPicker(press, 'tap');
+    else this._tapElement(first);
   }
 
   private _onHold(press: Press): void {
     press.long = true;
     this._holdTimer = undefined;
+    const [first, ...others] = press.hits;
+    if (first === undefined) return;
+    if (others.length > 0) this._openPicker(press, 'details');
+    else this._showDetails(first);
+  }
+
+  /** What a tap on one device does: the installer tools take it in link mode, otherwise it is operated. */
+  private _tapElement(elementId: string): void {
+    if (this.mode === 'link') {
+      this.dispatchEvent(
+        new CustomEvent('maxsen-element-tap', { detail: { elementId }, bubbles: true, composed: true }),
+      );
+      return;
+    }
+    this._operate(elementId);
+  }
+
+  /** What a hold on one device does: its more-info dialog, when it has a working link. */
+  private _showDetails(elementId: string): void {
     const { hass, home } = this;
-    const id = press.elementId;
-    if (!hass || !home || !id) return;
-    const status = this._state(id).status;
-    const link = home.links[id];
+    if (!hass || !home) return;
+    const status = this._state(elementId).status;
+    const link = home.links[elementId];
     if (!link || status === 'unlinked' || status === 'missing') return;
     const entityId = primaryEntity(linkEntityIds(link, hass), hass);
     if (entityId) this._moreInfo(entityId);
+  }
+
+  // ---- the picker ----
+
+  private _openPicker(press: Press, intent: Picker['intent']): void {
+    const active = (this.renderRoot as ShadowRoot).activeElement;
+    this._returnFocus = active instanceof HTMLElement ? active : undefined;
+    this._picker = { x: press.x, y: press.y, ids: press.hits, intent };
+    window.addEventListener('keydown', this._onPickerKey);
+  }
+
+  /** Closes the picker and, unless the view is going away, puts focus back where it was. */
+  private _closePicker(restoreFocus = true): void {
+    window.removeEventListener('keydown', this._onPickerKey);
+    if (!this._picker) return;
+    this._picker = undefined;
+    const back = this._returnFocus;
+    this._returnFocus = undefined;
+    if (!restoreFocus) return;
+    const target = back?.isConnected ? back : this.renderRoot.querySelector<HTMLElement>('.stage');
+    target?.focus();
+  }
+
+  private readonly _onPickerKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') this._closePicker();
+  };
+
+  private _choose(elementId: string): void {
+    const intent = this._picker?.intent;
+    this._closePicker();
+    if (intent === 'details') this._showDetails(elementId);
+    else this._tapElement(elementId);
   }
 
   private _moreInfo(entityId: string): void {
@@ -659,6 +779,66 @@ export class MaxsenFloorplanView extends LitElement {
     `;
   }
 
+  /** The choice among devices that overlap at a tap, anchored to the tap and kept inside the drawing. */
+  private _renderPicker(): TemplateResult | typeof nothing {
+    const picker = this._picker;
+    if (!picker) return nothing;
+    const items = this._items();
+    const rows = picker.ids.flatMap((id) => {
+      const item = items.get(id);
+      const el = this._elements.get(id);
+      return item && el && item.type !== 'note' ? [{ id, el, color: item.color, state: this._state(id) }] : [];
+    });
+    if (rows.length === 0) return nothing;
+    const stage = this._stageSize();
+    const size = {
+      w: Math.min(PICKER_WIDTH, stage.w - 2 * PICKER_MARGIN),
+      h: Math.min(rows.length * PICKER_ROW + 2 * PICKER_PADDING, stage.h - 2 * PICKER_MARGIN),
+    };
+    const at = placeInside(picker, size, stage, PICKER_GAP, PICKER_MARGIN);
+    // Without a link there is nothing to operate, but the installer can still pick it to link it.
+    const choosable = (status: VisualState['status']) =>
+      this.mode === 'link' || (status !== 'unlinked' && status !== 'missing');
+    return html`
+      <div class="picker-layer">
+        <div
+          class="picker-backdrop"
+          @pointerdown=${(e: Event) => {
+            e.stopPropagation();
+            this._closePicker();
+          }}
+        ></div>
+        <div
+          class="picker"
+          role="dialog"
+          aria-label=${picker.intent === 'details' ? 'Choose a device to open' : 'Choose a device'}
+          style=${styleMap({
+            left: `${round(at.x)}px`,
+            top: `${round(at.y)}px`,
+            width: `${round(size.w)}px`,
+            maxHeight: `${round(size.h)}px`,
+          })}
+          @pointerdown=${(e: Event) => e.stopPropagation()}
+          @wheel=${(e: Event) => e.stopPropagation()}
+          @keydown=${this._onPickerKey}
+        >
+          ${rows.map(
+            ({ id, el, color, state }) => html`<button
+              type="button"
+              class=${classMap({ pick: true, dim: !choosable(state.status) })}
+              aria-disabled=${choosable(state.status) ? 'false' : 'true'}
+              @click=${() => this._choose(id)}
+            >
+              <span class="dot" style=${styleMap({ background: color })}></span>
+              <span class="pick-name">${el.label || el.productName}</span>
+              <span class="pick-state">${state.text ?? STATUS_TEXT[state.status]}</span>
+            </button>`,
+          )}
+        </div>
+      </div>
+    `;
+  }
+
   private _renderPopup(): TemplateResult | typeof nothing {
     const popup = this._popup;
     const hass = this.hass;
@@ -712,6 +892,7 @@ export class MaxsenFloorplanView extends LitElement {
               aria-selected=${l.id === this._levelId ? 'true' : 'false'}
               class=${classMap({ active: l.id === this._levelId })}
               @click=${() => {
+                this._closePicker();
                 this._levelId = l.id;
                 this._whole = false;
               }}
@@ -725,13 +906,22 @@ export class MaxsenFloorplanView extends LitElement {
                   (option) => html`<button
                     class=${classMap({ active: layer === option })}
                     aria-pressed=${layer === option ? 'true' : 'false'}
-                    @click=${() => (this._layer = option)}
+                    @click=${() => {
+                      this._closePicker();
+                      this._layer = option;
+                    }}
                   >${LAYER_LABELS[option]}</button>`,
                 )}
               </div>`
             : nothing}
           ${canFit
-            ? html`<button class="fit" @click=${() => (this._whole = !this._whole)}>
+            ? html`<button
+                class="fit"
+                @click=${() => {
+                  this._closePicker();
+                  this._whole = !this._whole;
+                }}
+              >
                 ${this._whole ? 'Fit to rooms' : 'Whole drawing'}
               </button>`
             : nothing}
@@ -739,6 +929,7 @@ export class MaxsenFloorplanView extends LitElement {
       </div>
       <div
         class="stage"
+        tabindex="-1"
         @pointerdown=${this._onDown}
         @pointermove=${this._onMove}
         @pointerup=${this._onUp}
@@ -750,6 +941,7 @@ export class MaxsenFloorplanView extends LitElement {
           ${boxes ? this._renderDrawing(plans, boxes.shown) : html`<div class="empty">This level has no plan.</div>`}
         </div>
       </div>
+      ${this._renderPicker()}
       ${this._renderPopup()}
       ${this._notice ? html`<div class="notice" role="status">${this._notice}</div>` : nothing}
     `;
@@ -832,6 +1024,9 @@ export class MaxsenFloorplanView extends LitElement {
       -webkit-user-select: none;
       -webkit-touch-callout: none;
       background: var(--card-background-color, #fff);
+    }
+    .stage:focus {
+      outline: none;
     }
     .canvas {
       position: absolute;
@@ -936,6 +1131,69 @@ export class MaxsenFloorplanView extends LitElement {
     .pill text {
       fill: var(--primary-text-color, #1f1d1a);
       font-weight: 600;
+    }
+    .picker-layer {
+      position: absolute;
+      inset: 0;
+    }
+    .picker-backdrop {
+      position: absolute;
+      inset: 0;
+    }
+    .picker {
+      position: absolute;
+      box-sizing: border-box;
+      overflow-y: auto;
+      padding: 4px 0;
+      border-radius: 14px;
+      background: var(--card-background-color, #fff);
+      box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        0 0 0 1px var(--divider-color, #e3e6ea);
+    }
+    .pick {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 48px;
+      padding: 0 16px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 16px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .pick + .pick {
+      border-top: 1px solid var(--divider-color, #e3e6ea);
+    }
+    .pick:focus-visible {
+      outline: 2px solid var(--primary-color, #2f6fed);
+      outline-offset: -2px;
+    }
+    .pick.dim {
+      opacity: 0.45;
+    }
+    .dot {
+      flex: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .pick-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pick-state {
+      flex: none;
+      color: var(--secondary-text-color, #5b6168);
+      font-size: 14px;
     }
     .popup-layer {
       position: absolute;

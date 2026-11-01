@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HomePlan, SceneItem } from '../src/types.ts';
-import { contentBox, layerOptions } from '../src/view-geometry.ts';
+import { contentBox, layerOptions, placeInside } from '../src/view-geometry.ts';
 
 function marker(x: number, y: number, size = 20, extra: Partial<SceneItem> = {}): SceneItem {
   return {
@@ -117,5 +117,42 @@ describe('layerOptions', () => {
     expect(layerOptions([plan('lighting', 'k')])).toEqual([]);
     expect(layerOptions([plan('smart-home', 'k')])).toEqual([]);
     expect(layerOptions([])).toEqual([]);
+  });
+});
+
+describe('placeInside', () => {
+  const bounds = { w: 800, h: 600 };
+  const size = { w: 280, h: 152 };
+
+  it('puts the box below the anchor, centred on it', () => {
+    expect(placeInside({ x: 400, y: 200 }, size, bounds, 14, 8)).toEqual({ x: 260, y: 214 });
+  });
+
+  it('keeps the box inside the bounds at every edge', () => {
+    expect(placeInside({ x: 5, y: 100 }, size, bounds, 14, 8).x).toBe(8);
+    expect(placeInside({ x: 795, y: 100 }, size, bounds, 14, 8).x).toBe(800 - 280 - 8);
+  });
+
+  it('goes above the anchor when there is no room below', () => {
+    expect(placeInside({ x: 400, y: 560 }, size, bounds, 14, 8)).toEqual({ x: 260, y: 560 - 14 - 152 });
+  });
+
+  it('slides up against the bottom margin when it fits neither above nor below', () => {
+    const tall = { w: 280, h: 400 };
+    const at = placeInside({ x: 400, y: 300 }, tall, bounds, 14, 8);
+    expect(at.y).toBe(600 - 400 - 8);
+    expect(at.y + tall.h).toBeLessThanOrEqual(600 - 8);
+  });
+
+  it('never leaves the bounds, wherever the anchor is', () => {
+    for (const x of [0, 10, 400, 790, 800]) {
+      for (const y of [0, 10, 300, 590, 600]) {
+        const at = placeInside({ x, y }, size, bounds, 14, 8);
+        expect(at.x).toBeGreaterThanOrEqual(8);
+        expect(at.y).toBeGreaterThanOrEqual(8);
+        expect(at.x + size.w).toBeLessThanOrEqual(800 - 8);
+        expect(at.y + size.h).toBeLessThanOrEqual(600 - 8);
+      }
+    }
   });
 });

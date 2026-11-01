@@ -104,3 +104,25 @@ export function layerOptions(plans: HomePlan[]): Layer[] {
   const sameBackground = plans.every((p) => p.background.key === plans[0]?.background.key);
   return sameBackground ? ['all', 'smart-home', 'lighting'] : ['smart-home', 'lighting'];
 }
+
+/**
+ * Where to put a box of `size` so that it sits near `anchor` and fully inside `bounds` (which
+ * starts at 0, 0), `margin` from its edges. It goes below the anchor, centred on it, `gap` away;
+ * above when there is no room below, and otherwise slid up against the bottom margin.
+ */
+export function placeInside(
+  anchor: { x: number; y: number },
+  size: { w: number; h: number },
+  bounds: { w: number; h: number },
+  gap: number,
+  margin: number,
+): { x: number; y: number } {
+  const x = Math.max(margin, Math.min(anchor.x - size.w / 2, bounds.w - size.w - margin));
+  const below = anchor.y + gap;
+  const above = anchor.y - gap - size.h;
+  let y: number;
+  if (below + size.h <= bounds.h - margin) y = below;
+  else if (above >= margin) y = above;
+  else y = Math.max(margin, bounds.h - size.h - margin);
+  return { x, y };
+}

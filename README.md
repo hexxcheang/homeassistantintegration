@@ -66,6 +66,9 @@ Do this on site, signed in to Home Assistant as an administrator.
      switch, then tap that switch. Pick lights together, or other devices together, not both.
    - Elements that are not shown on the drawing are under **Not on the drawing**. Tap one there
      to pick it.
+   - Where several elements lie under your finger (a switch with a downlight on it), a short
+     list opens beside the tap, nearest first. Choose the one you mean. The same list opens in
+     everyday use, where choosing a device operates it, or opens its details if you held.
    - The line at the top counts what is left ("3 not linked yet") and says "Everything is linked."
      when you are done.
 4. **Create starter scenes.** Makes "All off", one "All off – (level name)" per level and

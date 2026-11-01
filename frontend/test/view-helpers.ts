@@ -82,3 +82,50 @@ export function wheel(target: Element, deltaY: number, x = 400, y = 300): void {
   Object.defineProperties(e, { clientX: { value: x }, clientY: { value: y } });
   target.dispatchEvent(e);
 }
+
+/** The stage is 800 x 600 CSS px in tests (happy-dom has no layout, so the view's fallback applies). */
+export const STAGE = { w: 800, h: 600 };
+
+/**
+ * Where an item is on screen, in stage px: the centre of a marker, the anchor of a note, the middle
+ * of the first segment of a line. Reads the drawing's view box and the canvas zoom, so it holds at any zoom/pan.
+ */
+export function elementPoint(view: MaxsenFloorplanView, elementId: string): { x: number; y: number } {
+  const item = view.home?.package?.levels
+    .flatMap((l) => l.plans.flatMap((p) => p.scene.items))
+    .find((i) => i.elementId === elementId);
+  if (!item) throw new Error(`No item ${elementId}`);
+  const [bx, by, bw, bh] = (root(view).querySelector('svg')?.getAttribute('viewBox') ?? '')
+    .split(' ')
+    .map(Number) as [number, number, number, number];
+  const fit = Math.min(STAGE.w / bw, STAGE.h / bh);
+  const [x, y] =
+    item.type !== 'path'
+      ? [item.x, item.y]
+      : [((item.points[0]?.x ?? 0) + (item.points[1]?.x ?? 0)) / 2, ((item.points[0]?.y ?? 0) + (item.points[1]?.y ?? 0)) / 2];
+  const base = { x: (STAGE.w - bw * fit) / 2 + (x - bx) * fit, y: (STAGE.h - bh * fit) / 2 + (y - by) * fit };
+  const m = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(
+    root(view).querySelector<HTMLElement>('.canvas')?.style.transform ?? '',
+  );
+  const [tx, ty, s] = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 1];
+  return { x: base.x * s + tx, y: base.y * s + ty };
+}
+
+export const stageOf = (view: HTMLElement): HTMLElement => root(view).querySelector<HTMLElement>('.stage')!;
+
+/** A quick press and release on the stage, `dx`/`dy` px from the element's centre. */
+export function tapElement(view: MaxsenFloorplanView, elementId: string, dx = 0, dy = 0): void {
+  const p = elementPoint(view, elementId);
+  tap(stageOf(view), p.x + dx, p.y + dy);
+}
+
+/** Press on the stage at an element; release with `releaseElement`. */
+export function pressElement(view: MaxsenFloorplanView, elementId: string): void {
+  const p = elementPoint(view, elementId);
+  pointer(stageOf(view), 'pointerdown', p);
+}
+
+export function releaseElement(view: MaxsenFloorplanView, elementId: string): void {
+  const p = elementPoint(view, elementId);
+  pointer(stageOf(view), 'pointerup', p);
+}

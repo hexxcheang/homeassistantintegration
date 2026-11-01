@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import '../src/floorplan-view.ts';
-import type { HomePackage, HomeResponse, Link } from '../src/types.ts';
+import { MaxsenFloorplanView } from '../src/floorplan-view.ts';
+import type { HomePackage, HomeResponse, Link, ScenePath, StoredHomePackage } from '../src/types.ts';
 import { contentBox } from '../src/view-geometry.ts';
 import { home, makeHass } from './helpers.ts';
-import { group, homeResponse, mountView, pointer, root, settle, tap, wheel } from './view-helpers.ts';
+import { STAGE, group, homeResponse, mountView, pointer, elementPoint, pressElement, releaseElement, root, settle, stageOf, tap, tapElement, wheel } from './view-helpers.ts';
 
 const SWITCH_DEVICE: Link = { type: 'device', id: 'dev-hall' };
 const LIGHT: Link = { type: 'entity', id: 'light.kitchen' };
@@ -215,7 +215,7 @@ describe('levels and plan types', () => {
     expect(ids(view)).toEqual(['dl1', 'dl2', 'dl3', 'led1']);
     expect(buttonLabelled(view, 'Lighting').getAttribute('aria-pressed')).toBe('true');
 
-    tap(group(view, 'dl2').querySelector('.hit')!);
+    tapElement(view, 'dl2');
     expect(taps).toEqual(['dl2']);
 
     buttonLabelled(view, 'All').click();
@@ -352,7 +352,7 @@ describe('use mode', () => {
     const call = vi.spyOn(hass, 'callService');
     const view = await mountView({ hass, home: homeResponse() });
 
-    tap(group(view, 'dl2'));
+    tapElement(view, 'dl2');
     await settle(view);
 
     expect(call).not.toHaveBeenCalled();
@@ -366,7 +366,7 @@ describe('use mode', () => {
       home: homeResponse({ links: { dl2: { type: 'entity', id: 'light.gone' } } }),
     });
 
-    tap(group(view, 'dl2'));
+    tapElement(view, 'dl2');
     expect(call).not.toHaveBeenCalled();
   });
 
@@ -375,7 +375,7 @@ describe('use mode', () => {
     const call = vi.spyOn(hass, 'callService');
     const view = await mountView({ hass, home: homeResponse({ links: { sw1: SWITCH_DEVICE } }) });
 
-    tap(group(view, 'sw1'));
+    tapElement(view, 'sw1');
 
     expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', {
       entity_id: ['switch.hall'],
@@ -395,8 +395,8 @@ describe('use mode', () => {
       }),
     });
 
-    tap(group(view, 'dl1'));
-    tap(group(view, 'dl2'));
+    tapElement(view, 'dl1');
+    tapElement(view, 'dl2');
 
     expect(call.mock.calls).toEqual([
       ['cover', 'open_cover', { entity_id: ['cover.a'] }],
@@ -414,7 +414,7 @@ describe('use mode', () => {
     const seen: unknown[] = [];
     view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
 
-    tap(group(view, 'sen1'));
+    tapElement(view, 'sen1');
 
     expect(call).not.toHaveBeenCalled();
     expect(seen).toEqual([{ entityId: 'sensor.gang_temp' }]);
@@ -428,9 +428,9 @@ describe('use mode', () => {
     const seen: { entityId: string }[] = [];
     view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
 
-    pointer(group(view, 'dl1'), 'pointerdown');
+    pressElement(view, 'dl1');
     vi.advanceTimersByTime(600);
-    pointer(group(view, 'dl1'), 'pointerup');
+    releaseElement(view, 'dl1');
 
     expect(seen).toEqual([{ entityId: 'light.kitchen' }]);
     expect(call).not.toHaveBeenCalled();
@@ -444,37 +444,42 @@ describe('use mode', () => {
     const seen: unknown[] = [];
     view.addEventListener('hass-more-info', (e) => seen.push(e));
 
-    pointer(group(view, 'dl1'), 'pointerdown', { x: 100, y: 100 });
-    pointer(group(view, 'dl1'), 'pointermove', { x: 160, y: 100 });
+    pressElement(view, 'dl1');
+    const at = elementPoint(view, 'dl1');
+    pointer(stageOf(view), 'pointermove', { x: at.x + 60, y: at.y });
     vi.advanceTimersByTime(700);
-    pointer(group(view, 'dl1'), 'pointerup', { x: 160, y: 100 });
+    pointer(stageOf(view), 'pointerup', { x: at.x + 60, y: at.y });
 
     expect(call).not.toHaveBeenCalled();
     expect(seen).toEqual([]);
   });
 
-  it('taps and holds on the hit twin of an LED strip act on the strip', async () => {
+  it('taps and holds anywhere along the hit stroke of an LED strip act on the strip', async () => {
     const hass = withImages();
     const call = vi.spyOn(hass, 'callService');
     const view = await mountView({
       hass,
       home: homeResponse({ links: { led1: { type: 'entity', id: 'light.kitchen' } } }),
     });
-    const twin = group(view, 'led1').querySelector('path.hit')!;
     const seen: unknown[] = [];
     view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
 
-    tap(twin);
+    tapElement(view, 'led1');
     expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', {
       entity_id: ['light.kitchen'],
     });
+    // Within the 22 px half-width beside the line, not 30 px away.
+    tapElement(view, 'led1', 0, 20);
+    expect(call).toHaveBeenCalledTimes(2);
+    tapElement(view, 'led1', 0, 30);
+    expect(call).toHaveBeenCalledTimes(2);
 
     vi.useFakeTimers();
-    pointer(twin, 'pointerdown');
+    pressElement(view, 'led1');
     vi.advanceTimersByTime(600);
-    pointer(twin, 'pointerup');
+    releaseElement(view, 'led1');
     expect(seen).toEqual([{ entityId: 'light.kitchen' }]);
-    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledTimes(2);
   });
 
   it('opens a popup with a row per entity for a device with several controls', async () => {
@@ -485,7 +490,7 @@ describe('use mode', () => {
       home: homeResponse({ links: { sw1: { type: 'device', id: 'dev-gang' } } }),
     });
 
-    tap(group(view, 'sw1'));
+    tapElement(view, 'sw1');
     await settle(view);
 
     expect(call).not.toHaveBeenCalled();
@@ -533,7 +538,7 @@ describe('use mode', () => {
 
     it('lists only the gangs in the popup', async () => {
       const view = await mountView({ hass: tuyaHass(), home: homeResponse({ links: TUYA }) });
-      tap(group(view, 'sw1'));
+      tapElement(view, 'sw1');
       await settle(view);
       const rows = [...root(view).querySelectorAll('.popup .row')];
       expect(rows.map((r) => r.querySelector('.name')?.textContent)).toEqual(['Left', 'Right']);
@@ -544,9 +549,9 @@ describe('use mode', () => {
       vi.useFakeTimers();
       const seen: { entityId: string }[] = [];
       view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
-      pointer(group(view, 'sw1'), 'pointerdown');
+      pressElement(view, 'sw1');
       vi.advanceTimersByTime(600);
-      pointer(group(view, 'sw1'), 'pointerup');
+      releaseElement(view, 'sw1');
       expect(seen).toEqual([{ entityId: 'switch.gang1' }]);
     });
   });
@@ -558,7 +563,7 @@ describe('link mode', () => {
     const taps: unknown[] = [];
     view.addEventListener('maxsen-element-tap', (e) => taps.push((e as CustomEvent).detail));
 
-    tap(group(view, 'cur1').querySelector('path.hit')!);
+    tapElement(view, 'cur1');
 
     expect(taps).toEqual([{ elementId: 'cur1' }]);
   });
@@ -574,8 +579,8 @@ describe('link mode', () => {
     const taps: unknown[] = [];
     view.addEventListener('maxsen-element-tap', (e) => taps.push((e as CustomEvent).detail));
 
-    tap(group(view, 'sw1'));
-    tap(group(view, 'dl2'));
+    tapElement(view, 'sw1');
+    tapElement(view, 'dl2');
 
     expect(taps).toEqual([{ elementId: 'sw1' }, { elementId: 'dl2' }]);
     expect(call).not.toHaveBeenCalled();
@@ -586,7 +591,7 @@ describe('link mode', () => {
     const taps: unknown[] = [];
     view.addEventListener('maxsen-element-tap', (e) => taps.push(e));
 
-    tap(group(view, 'note1'));
+    tapElement(view, 'note1');
 
     expect(taps).toEqual([]);
   });
@@ -771,6 +776,456 @@ describe('images', () => {
     const view = await mountView({ hass: makeHass(), home: homeResponse() });
     expect(root(view).querySelectorAll('g[data-element-id]')).toHaveLength(8);
     expect(root(view).querySelector('image')).toBeNull();
+  });
+});
+
+// ---- overlapping devices ----
+
+/**
+ * The fixture's Level 1 with a cluster drawn at (cx, cy): switch `sw1`, a second switch `sw2` 30
+ * units to its right, a downlight `dl1` 12 units from the first switch and an LED strip `led1`
+ * running 20 units below it. Their touch areas (22 px, about 26 units) overlap, as in the system
+ * test where lighting sat on top of the smart-home devices.
+ */
+function clusterPackage(cx = 180, cy = 220): StoredHomePackage {
+  const pkg = structuredClone(homeResponse().package as StoredHomePackage);
+  const [sh, lt] = pkg.levels[0]!.plans;
+  const sw1 = sh!.scene.items.find((i) => i.elementId === 'sw1')!;
+  if (sw1.type !== 'marker') throw new Error('sw1 should be a marker');
+  Object.assign(sw1, { x: cx, y: cy });
+  sh!.scene.items.push({ ...sw1, elementId: 'sw2', x: cx + 30, label: { ...sw1.label!, text: 'Hall switch', x: cx + 30 } });
+  sh!.elements.push({ ...sh!.elements.find((e) => e.id === 'sw1')!, id: 'sw2', label: 'Hall switch' });
+  const dl1 = lt!.scene.items.find((i) => i.elementId === 'dl1')!;
+  Object.assign(dl1, { x: cx + 10, y: cy + 6 });
+  const led1 = lt!.scene.items.find((i) => i.elementId === 'led1') as ScenePath;
+  led1.points = [{ x: cx - 80, y: cy + 20 }, { x: cx + 80, y: cy + 20 }];
+  led1.d = `M${cx - 80} ${cy + 20} L${cx + 80} ${cy + 20}`;
+  return pkg;
+}
+
+const CLUSTER_LINKS: Record<string, Link> = {
+  sw1: { type: 'entity', id: 'switch.hall' },
+  sw2: { type: 'entity', id: 'switch.gang1' },
+  dl1: { type: 'entity', id: 'light.kitchen' },
+  led1: { type: 'entity', id: 'light.strip' },
+};
+
+function clusterHass(extra: Record<string, { state: string; attributes?: Record<string, unknown> }> = {}) {
+  return withImages(
+    makeHass({
+      states: {
+        'switch.hall': { state: 'off' },
+        'switch.gang1': { state: 'on' },
+        'light.kitchen': { state: 'on' },
+        'light.strip': { state: 'off' },
+        ...extra,
+      },
+    }),
+  );
+}
+
+const picker = (view: HTMLElement) => root(view).querySelector<HTMLElement>('.picker');
+const pickRows = (view: HTMLElement) => [...root(view).querySelectorAll<HTMLButtonElement>('.picker .pick')];
+const rowTexts = (view: HTMLElement) =>
+  pickRows(view).map((r) => [r.querySelector('.pick-name')?.textContent, r.querySelector('.pick-state')?.textContent]);
+const rowNamed = (view: HTMLElement, name: string): HTMLButtonElement => {
+  const row = pickRows(view).find((r) => r.querySelector('.pick-name')?.textContent === name);
+  if (!row) throw new Error(`No picker row "${name}"`);
+  return row;
+};
+const key = (target: EventTarget, k: string) =>
+  target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, composed: true, cancelable: true }));
+
+describe('overlapping devices (the picker)', () => {
+  it('B3: a tap on a switch under a downlight and an LED strip lists all three, nearest first, and acts on none', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    expect(buttonLabelled(view, 'All').getAttribute('aria-pressed')).toBe('true');
+
+    tapElement(view, 'sw1');
+    await settle(view);
+
+    expect(picker(view)?.getAttribute('role')).toBe('dialog');
+    expect(rowTexts(view)).toEqual([
+      ['Entrance switch', 'Off'],
+      ['Luna Downlight', 'On'],
+      ['Lumi Cove Strip', 'Off'],
+    ]);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('B3: whichever of the three is tapped at its centre, it heads the list, and nothing acts until one is chosen', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    const first = { sw1: 'Entrance switch', dl1: 'Luna Downlight', led1: 'Lumi Cove Strip' };
+
+    for (const [id, name] of Object.entries(first)) {
+      tapElement(view, id);
+      await settle(view);
+      expect(pickRows(view)[0]?.querySelector('.pick-name')?.textContent, id).toBe(name);
+      expect(pickRows(view).length, id).toBeGreaterThanOrEqual(3);
+      key(window, 'Escape');
+      await settle(view);
+      expect(picker(view)).toBeNull();
+    }
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('choosing a row acts on that device only, as a tap would, and closes the picker', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    rowNamed(view, 'Lumi Cove Strip').click();
+    await settle(view);
+
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['light.strip'] });
+    expect(picker(view)).toBeNull();
+  });
+
+  it('Review Focus 4: a tap exactly between two touching switches lists both, and choosing one toggles only that one', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    buttonLabelled(view, 'Smart Home').click();
+    await settle(view);
+    const a = elementPoint(view, 'sw1');
+    const b = elementPoint(view, 'sw2');
+
+    tap(stageOf(view), (a.x + b.x) / 2, (a.y + b.y) / 2);
+    await settle(view);
+
+    expect(pickRows(view).map((r) => r.querySelector('.pick-name')?.textContent).sort()).toEqual([
+      'Entrance switch',
+      'Hall switch',
+    ]);
+    expect(call).not.toHaveBeenCalled();
+    rowNamed(view, 'Hall switch').click();
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['switch.gang1'] });
+  });
+
+  it('Review Focus 4: a tap on one isolated marker acts directly, with no picker', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({
+      hass,
+      home: homeResponse({ package: clusterPackage(), links: { ...CLUSTER_LINKS, dl2: { type: 'entity', id: 'light.kitchen' } } }),
+    });
+
+    tapElement(view, 'dl2');
+    await settle(view);
+
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['light.kitchen'] });
+  });
+
+  it('a layer that is not shown is never hit: Smart Home acts on the switch alone, Lighting lists only lights', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    buttonLabelled(view, 'Smart Home').click();
+    await settle(view);
+    tapElement(view, 'sw1');
+    await settle(view);
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['switch.hall'] });
+
+    buttonLabelled(view, 'Lighting').click();
+    await settle(view);
+    tapElement(view, 'dl1');
+    await settle(view);
+    expect(rowTexts(view).map((r) => r[0])).toEqual(['Luna Downlight', 'Lumi Cove Strip']);
+  });
+
+  it('opens the picker on a hold of a cluster, and choosing a row opens more-info, not a toggle', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+    vi.useFakeTimers();
+
+    pressElement(view, 'sw1');
+    vi.advanceTimersByTime(600);
+    releaseElement(view, 'sw1');
+    await view.updateComplete;
+
+    expect(rowTexts(view).map((r) => r[0])).toEqual(['Entrance switch', 'Luna Downlight', 'Lumi Cove Strip']);
+    expect(seen).toEqual([]);
+    rowNamed(view, 'Luna Downlight').click();
+    await view.updateComplete;
+
+    expect(seen).toEqual([{ entityId: 'light.kitchen' }]);
+    expect(call).not.toHaveBeenCalled();
+    expect(picker(view)).toBeNull();
+  });
+
+  it('in link mode, a tap on a cluster opens the picker and choosing emits maxsen-element-tap for that id', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({
+      hass,
+      mode: 'link',
+      home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }),
+    });
+    const taps: unknown[] = [];
+    view.addEventListener('maxsen-element-tap', (e) => taps.push((e as CustomEvent).detail));
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    expect(taps).toEqual([]);
+    rowNamed(view, 'Lumi Cove Strip').click();
+    await settle(view);
+
+    expect(taps).toEqual([{ elementId: 'led1' }]);
+    expect(call).not.toHaveBeenCalled();
+    expect(picker(view)).toBeNull();
+  });
+
+  it('greys an unlinked device in the picker: in use mode choosing it closes the picker and does nothing', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({
+      hass,
+      home: homeResponse({ package: clusterPackage(), links: { sw1: CLUSTER_LINKS['sw1'] as Link } }),
+    });
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push(e));
+
+    tapElement(view, 'sw1');
+    await settle(view);
+
+    expect(pickRows(view).map((r) => r.classList.contains('dim'))).toEqual([false, true, true]);
+    expect(pickRows(view).map((r) => r.getAttribute('aria-disabled'))).toEqual(['false', 'true', 'true']);
+    expect(rowTexts(view)[1]).toEqual(['Luna Downlight', 'Not linked']);
+    rowNamed(view, 'Luna Downlight').click();
+    await settle(view);
+
+    expect(picker(view)).toBeNull();
+    expect(call).not.toHaveBeenCalled();
+    expect(seen).toEqual([]);
+  });
+
+  it('lets the installer pick an unlinked device in link mode', async () => {
+    const view = await mountView({ hass: clusterHass(), mode: 'link', home: homeResponse({ package: clusterPackage() }) });
+    const taps: unknown[] = [];
+    view.addEventListener('maxsen-element-tap', (e) => taps.push((e as CustomEvent).detail));
+
+    tapElement(view, 'sw1');
+    await settle(view);
+
+    expect(pickRows(view).map((r) => r.classList.contains('dim'))).toEqual([false, false, false]);
+    expect(pickRows(view).map((r) => r.getAttribute('aria-disabled'))).toEqual(['false', 'false', 'false']);
+    rowNamed(view, 'Luna Downlight').click();
+    expect(taps).toEqual([{ elementId: 'dl1' }]);
+  });
+
+  it('closes on Escape, from a row or from anywhere in the window', async () => {
+    const view = await mountView({ hass: clusterHass(), home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    key(pickRows(view)[1] as HTMLElement, 'Escape');
+    await settle(view);
+    expect(picker(view)).toBeNull();
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    key(pickRows(view)[1] as HTMLElement, 'ArrowDown');
+    await settle(view);
+    expect(picker(view)).not.toBeNull();
+    key(window, 'Escape');
+    await settle(view);
+    expect(picker(view)).toBeNull();
+  });
+
+  it('closes on a tap outside it without acting on what was tapped, and not on a tap inside it', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    pointer(picker(view)!, 'pointerdown');
+    await settle(view);
+    expect(picker(view)).not.toBeNull();
+
+    pointer(root(view).querySelector('.picker-backdrop')!, 'pointerdown');
+    pointer(root(view).querySelector('.picker-backdrop')!, 'pointerup');
+    await settle(view);
+
+    expect(picker(view)).toBeNull();
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('moves focus to the first row, and gives it back to where it was when the picker closes', async () => {
+    const view = await mountView({ hass: clusterHass(), home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    const layerButton = buttonLabelled(view, 'Lighting');
+    layerButton.focus();
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    expect(root(view).activeElement).toBe(pickRows(view)[0]);
+
+    key(root(view).activeElement as HTMLElement, 'Escape');
+    await settle(view);
+    expect(root(view).activeElement).toBe(layerButton);
+
+    // Nothing in particular was focused: focus returns to the drawing.
+    (root(view).activeElement as HTMLElement).blur();
+    tapElement(view, 'sw1');
+    await settle(view);
+    rowNamed(view, 'Luna Downlight').click();
+    await settle(view);
+    expect(root(view).activeElement).toBe(stageOf(view));
+  });
+
+  it('closes when the layer or the level changes, or the view is removed, and leaves no listener behind', async () => {
+    const added = vi.spyOn(window, 'addEventListener');
+    const removed = vi.spyOn(window, 'removeEventListener');
+    const view = await mountView({ hass: clusterHass(), home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    buttonLabelled(view, 'Lighting').click();
+    await settle(view);
+
+    tapElement(view, 'dl1');
+    await settle(view);
+    expect(picker(view)).not.toBeNull();
+    buttonLabelled(view, 'Smart Home').click();
+    await settle(view);
+    expect(picker(view)).toBeNull();
+
+    buttonLabelled(view, 'Lighting').click();
+    await settle(view);
+    tapElement(view, 'dl1');
+    await settle(view);
+    expect(picker(view)).not.toBeNull();
+    buttonLabelled(view, 'Level 2').click();
+    await settle(view);
+    expect(picker(view)).toBeNull();
+
+    buttonLabelled(view, 'Level 1').click();
+    await settle(view);
+    tapElement(view, 'dl1');
+    await settle(view);
+    expect(picker(view)).not.toBeNull();
+    view.remove();
+    // Every window listener the picker added has been taken off again.
+    const handlers = (spy: typeof added) => spy.mock.calls.filter(([type]) => type === 'keydown').map(([, fn]) => fn);
+    expect(handlers(added).length).toBeGreaterThan(0);
+    for (const fn of handlers(added)) expect(handlers(removed)).toContain(fn);
+  });
+
+  it('shows the live state of each device, and follows it as Home Assistant reports changes', async () => {
+    const hass = clusterHass({ 'sensor.led_temp': { state: '21.5', attributes: { unit_of_measurement: '°C' } } });
+    const view = await mountView({
+      hass,
+      home: homeResponse({
+        package: clusterPackage(),
+        links: { ...CLUSTER_LINKS, led1: { type: 'entity', id: 'sensor.led_temp' } },
+      }),
+    });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    expect(rowTexts(view)).toEqual([
+      ['Entrance switch', 'Off'],
+      ['Luna Downlight', 'On'],
+      ['Lumi Cove Strip', '21.5 °C'],
+    ]);
+
+    view.hass = clusterHass({
+      'switch.hall': { state: 'on' },
+      'light.kitchen': { state: 'unavailable' },
+      'sensor.led_temp': { state: '22.0', attributes: { unit_of_measurement: '°C' } },
+    });
+    await settle(view);
+    expect(rowTexts(view)).toEqual([
+      ['Entrance switch', 'On'],
+      ['Luna Downlight', 'Unavailable'],
+      ['Lumi Cove Strip', '22.0 °C'],
+    ]);
+  });
+
+  it('marks each row with a dot in the colour of the device\'s icon', async () => {
+    const view = await mountView({ hass: clusterHass(), home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+
+    const dots = pickRows(view).map((r) => r.querySelector<HTMLElement>('.dot')!.getAttribute('style') ?? '');
+    expect(dots[0]).toMatch(/#2f5fb3|rgb\(47, 95, 179\)/i);
+    expect(dots[1]).toMatch(/#d28a00|rgb\(210, 138, 0\)/i);
+    expect(dots[2]).toMatch(/#c99700|rgb\(201, 151, 0\)/i);
+  });
+
+  it('shows the label, else the product name, as text and never as markup', async () => {
+    const pkg = clusterPackage();
+    const evil = '<img src=x onerror="alert(1)">';
+    pkg.levels[0]!.plans[0]!.elements.find((e) => e.id === 'sw1')!.label = evil;
+    const view = await mountView({ hass: clusterHass(), home: homeResponse({ package: pkg, links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+
+    expect(rowTexts(view)[0]?.[0]).toBe(evil);
+    expect(rowTexts(view)[1]?.[0]).toBe('Luna Downlight');
+    expect(picker(view)?.querySelector('img')).toBeNull();
+  });
+
+  it('keeps the picker, whose rows are at least 44 px high, inside the drawing wherever the tap is', async () => {
+    const css = (MaxsenFloorplanView.styles as unknown as { cssText: string }).cssText;
+    expect(Number(/\.pick\s*\{[^}]*min-height:\s*(\d+)px/.exec(css)?.[1])).toBeGreaterThanOrEqual(44);
+
+    for (const [cx, cy] of [[950, 950], [60, 60], [950, 60], [60, 950]] as const) {
+      const view = await mountView({
+        hass: clusterHass(),
+        home: homeResponse({ package: clusterPackage(cx, cy), links: CLUSTER_LINKS }),
+      });
+      tapElement(view, 'sw1');
+      await settle(view);
+      const at = picker(view)!;
+      const left = parseFloat(at.style.left);
+      const top = parseFloat(at.style.top);
+      const width = parseFloat(at.style.width);
+      const height = pickRows(view).length * 48 + 8;
+      expect(left, `${cx},${cy}`).toBeGreaterThanOrEqual(0);
+      expect(top, `${cx},${cy}`).toBeGreaterThanOrEqual(0);
+      expect(left + width, `${cx},${cy}`).toBeLessThanOrEqual(STAGE.w);
+      expect(top + height, `${cx},${cy}`).toBeLessThanOrEqual(STAGE.h);
+      // Close to the tap, not in a corner of the drawing.
+      const tapped = elementPoint(view, 'sw1');
+      expect(Math.abs(top - tapped.y), `${cx},${cy}`).toBeLessThan(height + 40);
+      view.remove();
+    }
+  });
+
+  it('finds the devices where they are on screen when the drawing is zoomed and panned', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({
+      hass,
+      home: homeResponse({ package: clusterPackage(), links: { ...CLUSTER_LINKS, dl2: { type: 'entity', id: 'light.kitchen' } } }),
+    });
+    wheel(stageOf(view), -500, 300, 200);
+    await settle(view);
+    expect(stageOf(view).querySelector<HTMLElement>('.canvas')!.style.transform).not.toContain('scale(1)');
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    expect(pickRows(view)[0]?.querySelector('.pick-name')?.textContent).toBe('Entrance switch');
+    key(window, 'Escape');
+    await settle(view);
+
+    // A marker far from the cluster is alone under the finger, so it acts directly.
+    tapElement(view, 'dl2');
+    await settle(view);
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['light.kitchen'] });
   });
 });
 

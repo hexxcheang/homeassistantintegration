@@ -1,7 +1,7 @@
 # Maxsen Floor Plan Dashboard — Design
 
 Date: 2026-11-01
-Status: Draft, awaiting approval
+Status: Approved 2026-11-01
 Repos: `hexxcheang/homeassistantintegration` (HA side), `hexxcheang/maxsen-planner` (export)
 
 ## Intent
@@ -151,7 +151,9 @@ Chosen by the user: **B**.
 
 ### Home package *(format is Claude's call)*
 The same content whether downloaded through the connection or as a file. One
-`.zip` per project:
+JSON document per project, with background images embedded as base64 (changed
+from `.zip` during planning: same content, and no zip library needed on either
+side):
 - `manifest.json`: package schema version, planner project id, project
   title, export time, planner revision per plan.
 - Per level: id, name, sort order; per plan: type (`smart-home`/`lighting`),
@@ -159,7 +161,7 @@ The same content whether downloaded through the connection or as a file. One
   (from `render/scene.ts`, so the card draws exactly what the planner draws),
   and an element list: element id, category, kind, product and variant name,
   label. The card links by element id.
-- Background images as files inside the zip.
+- Background images embedded once each, keyed by planner file id.
 - No prices, customer name, contact or address.
 
 ### Which drawing is exported *(Claude's call)*

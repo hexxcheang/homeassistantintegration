@@ -1,7 +1,7 @@
 # Maxsen Device Assistant — Design
 
 Date: 2026-11-01
-Status: Draft, awaiting approval
+Status: Approved 2026-11-01
 
 ## Intent
 

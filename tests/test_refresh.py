@@ -15,6 +15,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.maxsen.const import DOMAIN
+from custom_components.maxsen.package import PackageError
 from custom_components.maxsen.store import MaxsenStore
 
 BASE = "https://planner.example.com"
@@ -238,7 +239,12 @@ async def test_planner_errors_leave_the_home_unchanged(
     assert image_files(hass, entry) == files
 
 
-async def test_an_unusable_package_is_invalid_package_with_the_reason(
+CONFIG_ERRORS = json.loads(
+    (Path(__file__).parent.parent / "custom_components/maxsen/strings.json").read_text()
+)["config"]["error"]
+
+
+async def test_an_unusable_package_is_invalid_package_with_the_sentence(
     hass, hass_ws_client, aioclient_mock, entry, home_package
 ):
     aioclient_mock.get(HOME_URL, json={**home_package, "schemaVersion": 2})
@@ -247,7 +253,7 @@ async def test_an_unusable_package_is_invalid_package_with_the_reason(
     resp = await preview(ws, entry)
 
     assert resp["error"]["code"] == "invalid_package"
-    assert "unsupported_version" in resp["error"]["message"]
+    assert resp["error"]["message"] == CONFIG_ERRORS["unsupported_version"]
 
 
 async def test_garbage_from_the_planner_is_invalid_package(
@@ -257,7 +263,33 @@ async def test_garbage_from_the_planner_is_invalid_package(
     ws = await hass_ws_client()
     resp = await preview(ws, entry)
     assert resp["error"]["code"] == "invalid_package"
-    assert "invalid_json" in resp["error"]["message"]
+    assert resp["error"]["message"] == CONFIG_ERRORS["invalid_file"]
+    assert "invalid_json" not in resp["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("reason", "error_key"),
+    [
+        ("invalid_json", "invalid_file"),
+        ("wrong_format", "invalid_file"),
+        ("missing_image", "invalid_file"),
+        ("unsupported_version", "unsupported_version"),
+        ("too_large", "too_large"),
+    ],
+)
+async def test_every_rejection_reason_gives_the_config_flow_sentence(
+    hass, hass_ws_client, aioclient_mock, entry, reason, error_key
+):
+    aioclient_mock.get(HOME_URL, json={})
+    ws = await hass_ws_client()
+    with patch(
+        "custom_components.maxsen.websocket.parse_package",
+        side_effect=PackageError(reason),
+    ):
+        resp = await preview(ws, entry)
+    assert resp["error"]["code"] == "invalid_package"
+    assert resp["error"]["message"] == CONFIG_ERRORS[error_key]
+    assert reason not in resp["error"]["message"]
 
 
 # ------------------------------------------------ who may refresh, and which home
@@ -683,7 +715,19 @@ async def test_a_bad_uploaded_file_is_invalid_package(
     with upload_file(tmp_path, b"not json"):
         resp = await preview(ws, entry, file_id=FILE_ID)
     assert resp["error"]["code"] == "invalid_package"
-    assert "invalid_json" in resp["error"]["message"]
+    assert resp["error"]["message"] == CONFIG_ERRORS["invalid_file"]
+
+
+async def test_an_uploaded_non_home_json_says_it_is_not_a_home_file(
+    hass, hass_ws_client, tmp_path, home_package
+):
+    entry = await setup_entry(hass, home_package, source="file")
+    ws = await hass_ws_client()
+    with upload_file(tmp_path, b"[1, 2]"):
+        resp = await preview(ws, entry, file_id=FILE_ID)
+    assert resp["error"]["code"] == "invalid_package"
+    assert "This is not a Maxsen home file." in resp["error"]["message"]
+    assert "wrong_format" not in resp["error"]["message"]
 
 
 # ------------------------------------------------------- which project it is for

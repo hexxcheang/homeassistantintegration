@@ -6,7 +6,7 @@
  */
 import type { HomeEvent } from '../src/api.ts';
 import { LIGHTING_CATEGORIES } from '../src/link-candidates.ts';
-import { PackageProblem, parseHomeFile } from './validate-package.ts';
+import { PackageProblem, type PackageReason, parseHomeFile } from './validate-package.ts';
 import type {
   ChangedDrawing,
   ChangedElement,
@@ -59,6 +59,16 @@ export interface FakeHass extends HassLike {
   /** Flip the door sensors every 20 s so alerts can be seen. Returns the stop function. */
   startSimulation(everyMs?: number): () => void;
 }
+
+/** What the panel says for a rejected refresh file: the same sentences as the integration's `websocket.py`. */
+const NOT_A_HOME_FILE = 'This is not a Maxsen home file.';
+const REJECTED_MESSAGES: Record<PackageReason, string> = {
+  invalid_json: NOT_A_HOME_FILE,
+  wrong_format: NOT_A_HOME_FILE,
+  missing_image: NOT_A_HOME_FILE,
+  unsupported_version: 'This home file is from a newer planner. Update this integration.',
+  too_large: 'This file is larger than 100 MB.',
+};
 
 /** What a rejected websocket call looks like in Home Assistant: `{code, message}`. */
 export class CommandError extends Error {
@@ -661,7 +671,7 @@ export function createFakeHass(
       parsed = parseHomeFile(text);
     } catch (error) {
       if (error instanceof PackageProblem) {
-        throw new CommandError('invalid_package', `The home was rejected: ${error.reason}`);
+        throw new CommandError('invalid_package', REJECTED_MESSAGES[error.reason]);
       }
       throw error;
     }

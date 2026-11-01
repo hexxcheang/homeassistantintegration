@@ -53,6 +53,18 @@ _QUICK_ITEM = vol.Schema(
 )
 
 
+# What the panel says when a refresh file is rejected. The same sentences as the
+# config flow (strings.json, config.error); a test keeps them in step.
+_NOT_A_HOME_FILE = "This is not a Maxsen home file."
+_REJECTED_MESSAGES = {
+    "invalid_json": _NOT_A_HOME_FILE,
+    "wrong_format": _NOT_A_HOME_FILE,
+    "missing_image": _NOT_A_HOME_FILE,
+    "unsupported_version": "This home file is from a newer planner. Update this integration.",
+    "too_large": "This file is larger than 100 MB.",
+}
+
+
 def image_url(entry_id: str, image_id: str) -> str:
     """The URL the card loads a background image from."""
     return f"/api/maxsen/image/{entry_id}/{image_id}"
@@ -293,7 +305,9 @@ async def ws_refresh_preview(
         package = await hass.async_add_executor_job(parse_package, raw)
     except PackageError as err:
         connection.send_error(
-            msg["id"], "invalid_package", f"The home was rejected: {err.reason}"
+            msg["id"],
+            "invalid_package",
+            _REJECTED_MESSAGES.get(err.reason, _NOT_A_HOME_FILE),
         )
         return
 

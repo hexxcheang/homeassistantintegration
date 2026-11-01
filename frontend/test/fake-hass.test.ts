@@ -710,8 +710,29 @@ describe('createFakeHass: where the home came from', () => {
     const { file_id } = (await (await upload(fake, formWith('not json'))).json()) as { file_id: string };
     await expect(ws(fake, { type: 'maxsen/refresh/preview', file_id })).rejects.toMatchObject({
       code: 'invalid_package',
-      message: 'The home was rejected: invalid_json',
+      message: 'This is not a Maxsen home file.',
     });
+  });
+
+  it('gives the config flow sentence for each kind of rejected file', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const rejected = async (text: string): Promise<string> => {
+      const { file_id } = (await (await upload(fake, formWith(text))).json()) as { file_id: string };
+      try {
+        await ws(fake, { type: 'maxsen/refresh/preview', file_id });
+      } catch (error) {
+        return (error as { message: string }).message;
+      }
+      throw new Error('expected the file to be rejected');
+    };
+    const missing = fresh();
+    missing.levels[0]!.plans[0]!.background.imageId = 'gone';
+    expect(await rejected('[1, 2]')).toBe('This is not a Maxsen home file.');
+    expect(await rejected(JSON.stringify(missing))).toBe('This is not a Maxsen home file.');
+    expect(await rejected(JSON.stringify({ ...fresh(), schemaVersion: 2 }))).toBe(
+      'This home file is from a newer planner. Update this integration.',
+    );
+    expect(await rejected('x'.repeat(100 * 1024 * 1024 + 1))).toBe('This file is larger than 100 MB.');
   });
 
   it('rejects an uploaded home for a different project', async () => {

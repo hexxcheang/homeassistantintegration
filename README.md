@@ -55,9 +55,10 @@ In YAML it is `type: custom:maxsen-floorplan-card`.
 
 Do this on site, signed in to Home Assistant as an administrator.
 
-1. **Installer mode on.** **Settings**, **Devices & services**, **Maxsen Home**, **Configure**,
-   switch **Installer mode** on, **Submit**. Without it the installer tools stay hidden and the
-   server refuses them, even for administrators.
+1. **Check that Installer mode is on.** It is on for a new home. To check, go to **Settings**,
+   **Devices & services**, **Maxsen Home**, **Configure**. If it is off, switch it on and
+   **Submit**. Without it the installer tools stay hidden and the server refuses them, even for
+   administrators.
 2. Open **Home** in the sidebar. Tap **Installer**.
 3. **Link devices.** Tap an element on the drawing, then tap the device (or, for lights, the light
    or switch) it belongs to in the list. Use **Search by name or room** to find it. The element

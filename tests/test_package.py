@@ -209,6 +209,12 @@ def test_parse_rejects_media_types_outside_png_jpeg_webp(home_package, media_typ
     assert reason_of(to_raw(home_package)) == "wrong_format"
 
 
+@pytest.mark.parametrize("media_type", [["image/png"], {}, None, 5])
+def test_parse_rejects_a_non_string_media_type_as_wrong_format(home_package, media_type):
+    home_package["images"]["file-l1"]["mediaType"] = media_type
+    assert reason_of(to_raw(home_package)) == "wrong_format"
+
+
 @pytest.mark.parametrize("media_type", ["image/png", "image/jpeg", "image/webp"])
 def test_parse_accepts_png_jpeg_webp(home_package, media_type):
     home_package["images"]["file-l1"]["mediaType"] = media_type

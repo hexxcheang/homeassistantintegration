@@ -67,7 +67,8 @@ def _validate_structure(pkg: dict) -> None:
     for image_id, image in images.items():
         _check(bool(IMAGE_ID_PATTERN.match(image_id)))
         _check(isinstance(image, dict))
-        _check(image.get("mediaType") in IMAGE_EXTENSIONS)
+        media_type = image.get("mediaType")
+        _check(_is_str(media_type) and media_type in IMAGE_EXTENSIONS)
         _check(_is_str(image.get("data")))
 
     levels = pkg.get("levels")

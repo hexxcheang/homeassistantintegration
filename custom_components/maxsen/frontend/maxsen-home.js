@@ -3035,27 +3035,28 @@ var pn = class extends U {
 		let n = this._run;
 		this._configuredEntryId = this.panel?.config?.entry_id, e || (this._status = "loading");
 		try {
-			let e = this._configuredEntryId;
-			if (!e) {
-				let r = await ge(t);
+			let r = this._configuredEntryId;
+			if (!r) {
+				let i = await ge(t);
 				if (n !== this._run) return;
-				if (!r) {
+				if (!i) {
+					if (e && this._home) throw Error("No Maxsen entry listed yet");
 					this._entryId = void 0, this._status = "none";
 					return;
 				}
-				if (r.state !== "loaded") throw Error(`Maxsen is ${r.state}`);
-				e = r.entryId;
+				if (i.state !== "loaded") throw Error(`Maxsen is ${i.state}`);
+				r = i.entryId;
 			}
-			this._entryId = e;
-			let r = await _e(t, e);
+			this._entryId = r;
+			let i = await _e(t, r);
 			if (n !== this._run) return;
-			this._home = r, this._status = "ready";
-			let i = await ve(t, e, () => void this._reload(n));
+			this._home = i, this._status = "ready";
+			let a = await ve(t, r, () => void this._reload(n));
 			if (n !== this._run) {
-				dn(i);
+				dn(a);
 				return;
 			}
-			this._unsubscribe = i, this._attempt = 0;
+			this._unsubscribe = a, this._attempt = 0;
 		} catch {
 			if (n !== this._run) return;
 			e && this._home || (this._status = "error"), this._retryTimer = setTimeout(() => {

@@ -358,6 +358,33 @@ describe('<maxsen-home-panel> after Home Assistant restarts', () => {
     expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')!.home?.links).toHaveProperty('dl1');
   });
 
+  it('keeps the home and retries when no entry is listed after a reconnect', async () => {
+    const fake = fakeHass();
+    const panel = await mountPanel({ hass: fake.hass });
+    vi.useFakeTimers();
+    const texts: string[] = [];
+    const observer = new MutationObserver(() => texts.push(panel.shadowRoot!.textContent ?? ''));
+    observer.observe(panel.shadowRoot!, { childList: true, subtree: true, characterData: true });
+    const shown = panel.shadowRoot!.querySelector('maxsen-floorplan-view');
+    fake.setEntries([]);
+
+    fake.reconnect();
+    await flush();
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).toBe(shown);
+    expect(panel.shadowRoot!.textContent).not.toContain('not set up');
+    expect(fake.subscribeCalls()).toBe(1);
+
+    fake.setEntries([{ entry_id: 'e1', state: 'loaded' }]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flush();
+    observer.disconnect();
+
+    expect(fake.subscribeCalls()).toBe(2);
+    expect(fake.liveSubscriptions()).toBe(1);
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).toBe(shown);
+    for (const text of texts) expect(text).not.toContain('not set up');
+  });
+
   it('leaves one subscription after three reconnects, never unsubscribing a previous connection', async () => {
     const fake = fakeHass();
     const panel = await mountPanel({ hass: fake.hass });

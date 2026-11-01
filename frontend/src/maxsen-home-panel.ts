@@ -198,6 +198,8 @@ export class MaxsenHomePanel extends LitElement {
         const entry = await findEntry(hass);
         if (run !== this._run) return;
         if (!entry) {
+          // After a reconnect or retry with a home on screen, "no entry" is retry-later too: keep it.
+          if (quiet && this._home) throw new Error('No Maxsen entry listed yet');
           this._entryId = undefined;
           this._status = 'none';
           return;

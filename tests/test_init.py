@@ -106,3 +106,32 @@ async def test_store_round_trip(hass):
     again = MaxsenStore(hass, "abc")
     await again.async_load()
     assert again.data["package"] == {"project": {"id": "p"}}
+
+
+async def test_removing_an_entry_deletes_its_images_and_store(
+    hass, hass_storage, home_package
+):
+    entry = make_entry(hass)
+    hass.data.setdefault(DOMAIN, {}).setdefault("pending", {})[
+        "proj-test-house"
+    ] = home_package
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await entry.runtime_data.async_set_quick_panel([{"type": "element", "id": "dl1"}])
+    folder = Path(hass.config.path("maxsen", entry.entry_id))
+    key = f"maxsen.{entry.entry_id}"
+    assert folder.is_dir()
+    assert key in hass_storage
+
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert not folder.exists()
+    assert key not in hass_storage
+
+
+async def test_removing_an_entry_without_saved_files_is_fine(hass):
+    entry = make_entry(hass)
+    folder = Path(hass.config.path("maxsen", entry.entry_id))
+    assert not folder.exists()
+
+    assert await hass.config_entries.async_remove(entry.entry_id)

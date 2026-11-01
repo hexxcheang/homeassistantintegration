@@ -38,3 +38,8 @@ LIGHTING_CATEGORIES = frozenset(
 SCENE_ALL_OFF = "All off"
 SCENE_ALL_OFF_LEVEL = "All off – {level}"
 SCENE_ALL_LIGHTS_OFF = "All lights off"
+
+# Events. The dispatcher signal tells websocket subscribers what changed
+# ("home", "links" or "quick_panel"); the bus event is for automations.
+SIGNAL_UPDATED = "maxsen_updated_{entry_id}"
+EVENT_QUICK_PANEL_UPDATED = "maxsen_quick_panel_updated"

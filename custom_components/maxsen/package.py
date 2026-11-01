@@ -26,7 +26,7 @@ _SAFE_IMAGE_ID = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
 
 PLAN_TYPES = ("smart-home", "lighting")
 
-_EXTENSIONS = {
+IMAGE_EXTENSIONS = {
     "image/png": "png",
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
@@ -134,7 +134,7 @@ async def save_images(hass: HomeAssistant, entry_id: str, pkg: dict) -> dict:
             data = base64.b64decode(image["data"], validate=True)
         except (binascii.Error, ValueError) as err:
             raise PackageError("wrong_format") from err
-        ext = _EXTENSIONS.get(media_type, "bin")
+        ext = IMAGE_EXTENSIONS.get(media_type, "bin")
         decoded[f"{image_id}.{ext}"] = (media_type, data)
         image_types[image_id] = media_type
 

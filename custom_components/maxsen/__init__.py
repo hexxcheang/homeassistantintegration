@@ -2,15 +2,37 @@
 
 from __future__ import annotations
 
+import logging
+import shutil
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.typing import ConfigType
 
 from .const import CONF_PROJECT_ID, DOMAIN
+from .http import MaxsenImageView
 from .package import PackageError, save_images
 from .store import MaxsenStore
+from .websocket import async_register_commands
+
+_LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 type MaxsenConfigEntry = ConfigEntry[MaxsenStore]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the websocket commands and image view, once per Home Assistant start.
+
+    They are shared by every entry (each command and URL carries an entry id),
+    so they belong here and not in ``async_setup_entry``.
+    """
+    async_register_commands(hass)
+    hass.http.register_view(MaxsenImageView())
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> bool:
@@ -44,3 +66,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> bo
 async def async_unload_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> bool:
     """Unload a config entry."""
     return True
+
+
+def _remove_folder(folder: str) -> None:
+    try:
+        shutil.rmtree(folder)
+    except FileNotFoundError:
+        pass
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> None:
+    """Delete the entry's saved images and stored data when the home is removed."""
+    folder = hass.config.path("maxsen", entry.entry_id)
+    try:
+        await hass.async_add_executor_job(_remove_folder, folder)
+    except OSError:
+        _LOGGER.warning("Could not delete the saved images in %s", folder, exc_info=True)
+    await MaxsenStore(hass, entry.entry_id).async_remove()

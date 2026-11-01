@@ -56,6 +56,7 @@
   - `shows "not set up yet" only when no maxsen entry exists on a fresh start`
   - `leaves one subscription after three reconnects`: the fake connection resubscribes like home-assistant-js-websocket unless `resubscribe:false` is passed. After three `ready` events, exactly one active `maxsen/subscribe` exists, and no unsubscribe was sent for a previous connection's id.
   - `api.subscribe passes { resubscribe: false }`
+  - `does not flash Loading on a quiet reconnect`: after a `ready` event the panel never renders the loading state while it re-checks, and only one `config_entries/get` runs per reconnect (system test B4).
 - [ ] **Step 2: Run** `cd frontend && npx vitest run test/maxsen-home-panel.test.ts test/api.test.ts`. Expected: FAIL.
 - [ ] **Step 3: Implement** the changes above:
   - An entry that is listed but not loaded during a reconnect or retry run counts as retry-later.
@@ -159,3 +160,21 @@
 - [ ] **Step 3: Implement** the module and the view changes.
 - [ ] **Step 4: Run** `npm test && npm run typecheck && npm run build && cd .. && .venv/bin/pytest -q`. Expected: PASS. Take a Playwright screenshot of the picker in the preview.
 - [ ] **Step 5: Commit** `feat(frontend): pick from overlapping devices`, then push.
+
+### Task 5: Small fixes from the real Home Assistant system test
+
+Added after the system test on 2026-11-01. The summary is in the session scratchpad: `ha-system-test/REPORT-summary.md`.
+
+**Files:**
+- Modify: `custom_components/maxsen/websocket.py`. The refresh `invalid_package` message maps `PackageError` reasons to the same sentences the config flow uses (`strings.json` errors: `invalid_file` → "This is not a Maxsen home file.", `unsupported_version`, `too_large`). Never show a raw reason code (B5).
+- Modify: `frontend/preview/fake-hass.ts` to match.
+- Modify: `README.md` checklist step 1. Installer mode is **on** for a new home, so the step becomes "Check that Installer mode is on" (D1).
+- Test: `tests/test_refresh.py`, `frontend/test/fake-hass.test.ts`
+
+- [ ] **Step 1: Write failing tests:** uploading a non-home JSON via refresh preview gives a message containing "This is not a Maxsen home file." and not `wrong_format`. The fake gives the same message.
+- [ ] **Step 2: Run** `.venv/bin/pytest tests/test_refresh.py -q`. Expected: FAIL.
+- [ ] **Step 3: Implement** the message map and the README edit.
+- [ ] **Step 4: Run** `.venv/bin/pytest -q && cd frontend && npm test`. Expected: PASS.
+- [ ] **Step 5: Commit** `fix: plain messages for rejected home files; README installer mode`, then push.
+
+Not in this plan: B6 (a wrong-project Reconfigure leaves an unused connection in the planner). That needs a planner change, a public "unpair with my token" route, and is listed for the next planner work.

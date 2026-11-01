@@ -1075,7 +1075,7 @@ describe('overlapping devices (the picker)', () => {
     expect(picker(view)).toBeNull();
   });
 
-  it('greys an unlinked device in the picker: in use mode choosing it closes the picker and does nothing', async () => {
+  it('I3: in use mode an unlinked device is not touchable: a switch beside one is operated at once, with no picker', async () => {
     const hass = clusterHass();
     const call = vi.spyOn(hass, 'callService');
     const view = await mountView({
@@ -1085,13 +1085,87 @@ describe('overlapping devices (the picker)', () => {
     const seen: unknown[] = [];
     view.addEventListener('hass-more-info', (e) => seen.push(e));
 
+    // The downlight 12 units away and the LED strip under it are not linked; they do nothing.
     tapElement(view, 'sw1');
     await settle(view);
 
-    expect(pickRows(view).map((r) => r.classList.contains('dim'))).toEqual([false, true, true]);
-    expect(pickRows(view).map((r) => r.getAttribute('aria-disabled'))).toEqual(['false', 'true', 'true']);
-    expect(rowTexts(view)[1]).toEqual(['Luna Downlight', 'Not linked']);
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['switch.hall'] });
+    expect(seen).toEqual([]);
+  });
+
+  it('I3: nor is a device whose link points at something that is gone', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({
+      hass,
+      home: homeResponse({
+        package: clusterPackage(),
+        links: { sw1: CLUSTER_LINKS['sw1'] as Link, dl1: { type: 'entity', id: 'light.deleted' }, led1: { type: 'device', id: 'dev-gone' } },
+      }),
+    });
+    expect(group(view, 'dl1').classList.contains('missing')).toBe(true);
+
+    tapElement(view, 'sw1');
+    await settle(view);
+
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['switch.hall'] });
+  });
+
+  it('I3: a hold on a cluster lists only the devices that have details to show', async () => {
+    const hass = clusterHass();
+    const view = await mountView({
+      hass,
+      home: homeResponse({ package: clusterPackage(), links: { sw1: CLUSTER_LINKS['sw1'] as Link, dl1: CLUSTER_LINKS['dl1'] as Link } }),
+    });
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+    vi.useFakeTimers();
+
+    pressElement(view, 'sw1');
+    vi.advanceTimersByTime(600);
+    await view.updateComplete;
+
+    // led1 is unlinked and left out: sw1 and dl1 remain.
+    expect(rowTexts(view).map((r) => r[0])).toEqual(['Entrance switch', 'Luna Downlight']);
+    expect(seen).toEqual([]);
+  });
+
+  it('I3: an unavailable device is skipped by a tap, so the working one beside it is operated; a hold still shows its details', async () => {
+    const hass = clusterHass({ 'light.kitchen': { state: 'unavailable' } });
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({
+      hass,
+      home: homeResponse({ package: clusterPackage(), links: { sw1: CLUSTER_LINKS['sw1'] as Link, dl1: CLUSTER_LINKS['dl1'] as Link } }),
+    });
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+    expect(group(view, 'dl1').classList.contains('unavailable')).toBe(true);
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['switch.hall'] });
+
+    // Held, the pair is a choice again: the unavailable one has details (its last state) to open.
+    vi.useFakeTimers();
+    pressElement(view, 'sw1');
+    vi.advanceTimersByTime(600);
+    await view.updateComplete;
+    expect(rowTexts(view)).toEqual([['Entrance switch', 'Off'], ['Luna Downlight', 'Unavailable']]);
     rowNamed(view, 'Luna Downlight').click();
+    expect(seen).toEqual([{ entityId: 'light.kitchen' }]);
+  });
+
+  it('I3: a tap on an unavailable device alone does nothing, not even a double-tap reset', async () => {
+    const hass = clusterHass({ 'light.kitchen': { state: 'unavailable' } });
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: { dl1: CLUSTER_LINKS['dl1'] as Link } }) });
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push(e));
+
+    tapElement(view, 'dl1');
     await settle(view);
 
     expect(picker(view)).toBeNull();

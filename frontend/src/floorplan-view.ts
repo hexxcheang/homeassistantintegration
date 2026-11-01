@@ -130,8 +130,10 @@ function sceneNodes(plan: HomePlan): SvgNode[] {
 
 interface Press {
   id: number;
-  /** Every element whose touch area held the press, nearest first. */
+  /** Every element whose touch area held the press, nearest first: what a hold can show details of. */
   hits: string[];
+  /** The same without what a tap cannot operate (unavailable devices in use mode). */
+  tapHits: string[];
   x: number;
   y: number;
   moved: boolean;
@@ -402,7 +404,9 @@ export class MaxsenFloorplanView extends LitElement {
    * large, zoomed-in marker can be tapped over its whole size), and a box for each reading pill
    * and text label beside it, which belong to the same element. Topmost first, so that of two at
    * the same distance the one drawn on top is listed first. Only the shown layers are here, and
-   * notes and unknown elements are not touchable.
+   * notes and unknown elements are not touchable. In use mode neither are elements with no
+   * working link, which a tap and a hold do nothing for (the installer tools in link mode take
+   * them).
    */
   private _touchAreas(): HitItem[] {
     const { plans } = this._visible();
@@ -423,11 +427,14 @@ export class MaxsenFloorplanView extends LitElement {
       h: b.h * fit * v.s,
       hitRadius: TEXT_HIT_PX,
     });
+    const linking = this.mode === 'link';
     const areas: HitItem[] = [];
     for (const plan of plans) {
       for (const item of plan.scene.items) {
         if (item.type === 'note' || !this._elements.has(item.elementId)) continue;
-        const reading = this._state(item.elementId).text;
+        const state = this._state(item.elementId);
+        if (!linking && (state.status === 'unlinked' || state.status === 'missing')) continue;
+        const reading = state.text;
         if (reading && PILLED.has(item.categoryId)) {
           areas.push(textBox(item.elementId, pillBox(item, reading, plan.width)));
         }
@@ -463,7 +470,10 @@ export class MaxsenFloorplanView extends LitElement {
     }
     if (this._pointers.size === 1) {
       const hits = elementsAt(p, this._touchAreas());
-      const press: Press = { id: e.pointerId, hits, x: p.x, y: p.y, moved: false, long: false };
+      // A tap on an unavailable device does nothing, so it must not turn a tap beside it into a picker.
+      const tapHits =
+        this.mode === 'use' ? hits.filter((id) => this._state(id).status !== 'unavailable') : hits;
+      const press: Press = { id: e.pointerId, hits, tapHits, x: p.x, y: p.y, moved: false, long: false };
       this._press = press;
       this._cancelHold();
       if (hits.length > 0 && this.mode === 'use') {
@@ -547,8 +557,10 @@ export class MaxsenFloorplanView extends LitElement {
   // ---- actions ----
 
   private _onTap(press: Press): void {
-    const [first, ...others] = press.hits;
+    const [first, ...others] = press.tapHits;
     if (first === undefined) {
+      // Only an unavailable device under the finger: nothing to do, and not the empty drawing either.
+      if (press.hits.length > 0) return;
       // A second tap on the empty drawing puts it back.
       const now = Date.now();
       const last = this._lastTap;
@@ -562,7 +574,7 @@ export class MaxsenFloorplanView extends LitElement {
       return;
     }
     // Several devices under the finger: never guess which one was meant.
-    if (others.length > 0) this._openPicker(press, 'tap');
+    if (others.length > 0) this._openPicker(press, 'tap', press.tapHits);
     else this._tapElement(first);
   }
 
@@ -571,7 +583,7 @@ export class MaxsenFloorplanView extends LitElement {
     this._holdTimer = undefined;
     const [first, ...others] = press.hits;
     if (first === undefined) return;
-    if (others.length > 0) this._openPicker(press, 'details');
+    if (others.length > 0) this._openPicker(press, 'details', press.hits);
     else this._showDetails(first);
   }
 
@@ -599,10 +611,10 @@ export class MaxsenFloorplanView extends LitElement {
 
   // ---- the picker ----
 
-  private _openPicker(press: Press, intent: Picker['intent']): void {
+  private _openPicker(press: Press, intent: Picker['intent'], ids: string[]): void {
     const active = (this.renderRoot as ShadowRoot).activeElement;
     this._returnFocus = active instanceof HTMLElement ? active : undefined;
-    this._picker = { x: press.x, y: press.y, ids: press.hits, intent };
+    this._picker = { x: press.x, y: press.y, ids, intent };
     window.addEventListener('keydown', this._onPickerKey);
   }
 

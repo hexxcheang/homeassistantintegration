@@ -1363,11 +1363,13 @@ var dn = class extends U {
 			w: t.w * r * o.s,
 			h: t.h * r * o.s,
 			hitRadius: Gt
-		}), u = [];
+		}), u = this.mode === "link", d = [];
 		for (let t of e) for (let e of t.scene.items) {
 			if (e.type === "note" || !this._elements.has(e.elementId)) continue;
-			let n = this._state(e.elementId).text;
-			n && en.has(e.categoryId) && u.push(l(e.elementId, rn(e, n, t.width))), e.label && u.push(l(e.elementId, an(e, e.label))), u.push(e.type === "marker" ? {
+			let n = this._state(e.elementId);
+			if (!u && (n.status === "unlinked" || n.status === "missing")) continue;
+			let i = n.text;
+			i && en.has(e.categoryId) && d.push(l(e.elementId, rn(e, i, t.width))), e.label && d.push(l(e.elementId, an(e, e.label))), d.push(e.type === "marker" ? {
 				elementId: e.elementId,
 				x: s(e.x),
 				y: c(e.y),
@@ -1382,7 +1384,7 @@ var dn = class extends U {
 				hitRadius: Math.max(Wt, e.strokeWidth / 2 * r * o.s)
 			});
 		}
-		return u.reverse();
+		return d.reverse();
 	}
 	_onDown(e) {
 		let t = e.currentTarget, n = this._local(e);
@@ -1391,15 +1393,16 @@ var dn = class extends U {
 			t.setPointerCapture?.(e.pointerId);
 		} catch {}
 		if (this._pointers.size === 1) {
-			let t = wt(n, this._touchAreas()), r = {
+			let t = wt(n, this._touchAreas()), r = this.mode === "use" ? t.filter((e) => this._state(e).status !== "unavailable") : t, i = {
 				id: e.pointerId,
 				hits: t,
+				tapHits: r,
 				x: n.x,
 				y: n.y,
 				moved: !1,
 				long: !1
 			};
-			this._press = r, this._cancelHold(), t.length > 0 && this.mode === "use" && (this._holdTimer = setTimeout(() => this._onHold(r), Rt));
+			this._press = i, this._cancelHold(), t.length > 0 && this.mode === "use" && (this._holdTimer = setTimeout(() => this._onHold(i), Rt));
 		} else if (this._pointers.size === 2) {
 			this._cancelPress();
 			let [e, t] = [...this._pointers.values()];
@@ -1457,20 +1460,21 @@ var dn = class extends U {
 		this._cancelHold(), this._press = void 0;
 	}
 	_onTap(e) {
-		let [t, ...n] = e.hits;
+		let [t, ...n] = e.tapHits;
 		if (t === void 0) {
+			if (e.hits.length > 0) return;
 			let t = Date.now(), n = this._lastTap;
 			n && t - n.t < Bt && Math.hypot(e.x - n.x, e.y - n.y) < Vt ? (this._lastTap = void 0, this._whole = !1, this._resetView()) : this._lastTap = {
 				t,
 				x: e.x,
 				y: e.y
 			};
-		} else n.length > 0 ? this._openPicker(e, "tap") : this._tapElement(t);
+		} else n.length > 0 ? this._openPicker(e, "tap", e.tapHits) : this._tapElement(t);
 	}
 	_onHold(e) {
 		e.long = !0, this._holdTimer = void 0;
 		let [t, ...n] = e.hits;
-		t !== void 0 && (n.length > 0 ? this._openPicker(e, "details") : this._showDetails(t));
+		t !== void 0 && (n.length > 0 ? this._openPicker(e, "details", e.hits) : this._showDetails(t));
 	}
 	_tapElement(e) {
 		this.mode === "link" ? this.dispatchEvent(new CustomEvent("maxsen-element-tap", {
@@ -1487,12 +1491,12 @@ var dn = class extends U {
 		let a = Ot(Dt(i, t), t);
 		a && this._moreInfo(a);
 	}
-	_openPicker(e, t) {
-		let n = this.renderRoot.activeElement;
-		this._returnFocus = n instanceof HTMLElement ? n : void 0, this._picker = {
+	_openPicker(e, t, n) {
+		let r = this.renderRoot.activeElement;
+		this._returnFocus = r instanceof HTMLElement ? r : void 0, this._picker = {
 			x: e.x,
 			y: e.y,
-			ids: e.hits,
+			ids: n,
 			intent: t
 		}, window.addEventListener("keydown", this._onPickerKey);
 	}

@@ -11,6 +11,10 @@ screens. Maxsen plans an add-on service that lets customers run Home Assistant
 model needs a device definition for HA, and the screen features (button label
 text, icons, backlight) must be controllable from HA.
 
+**Scope: every Maxsen Zigbee device** (decided by the user) — wall switches
+with screens first, but also plugs, sensors, curtain motors, thermostats and
+whatever comes next.
+
 This repo becomes the Maxsen integration team's workspace, set up so that
 Claude Code acts as the team's coding assistant: a developer supplies a
 device's Tuya datapoint (DP) export and the assistant produces a working,
@@ -40,13 +44,19 @@ one of them under another name.
    tests, and a device docs page — consistently structured across models.
 2. Before writing anything, the assistant checks whether the device's
    fingerprint (Zigbee model ID + manufacturer name) is already supported in
-   the pinned ZHC version, and reports that instead of duplicating it.
-3. Tests run offline (no device, no Z2M install) and catch wrong DP numbers,
+   the pinned ZHC version. If it is, the assistant doesn't rewrite it: it
+   produces a thin **Maxsen-branded** definition that reuses the upstream one
+   (see Decided).
+3. The pipeline is **device-agnostic**: any Tuya DP can be mapped to a ZHC
+   expose (switch, number, enum, binary, text, sensor value, cover, climate…).
+   Category helpers (gang switch, screen labels, backlight, energy metering,
+   cover, thermostat) sit on top as an optional convenience layer.
+4. Tests run offline (no device, no Z2M install) and catch wrong DP numbers,
    wrong types, and broken label encoding before anyone pairs hardware.
-4. Screen label text, backlight, and gang switches are covered by shared
+5. Screen label text, backlight, and gang switches are covered by shared
    helpers so each new model is mostly configuration. *(Icons deferred — see
    Decided.)*
-5. Each shipped converter works when dropped into a stock Z2M
+6. Each shipped converter works when dropped into a stock Z2M
    `external_converters` folder.
 
 ## Non-goals (for this version)
@@ -129,10 +139,23 @@ prove every DP travels over the Tuya cluster (0xEF00). The skill takes the
 fingerprint from the developer's answer (it's in the request sent to Maxsen's
 Tuya developer) or from a Z2M pairing/interview log. If neither is available,
 it uses a clearly marked placeholder, and the upstream check is re-run once
-the real fingerprint is known. Version 1 supports **all-DP (TS0601-style)**
-devices, which is how the known upstream LCD switches work. Switches whose
-gangs use standard on/off clusters on separate endpoints (TS000x-style) are
-detected and reported as unsupported for now, not guessed at.
+the real fingerprint is known. Version 1 generates definitions for **all-DP
+(TS0601-style)** devices, which is how the upstream LCD switches, curtain
+motors, thermostats and many sensors work. Many Tuya plugs and simple switches
+(TS000x / TS011F-style) instead use standard Zigbee clusters (on/off,
+metering) on separate endpoints; these are almost always already in ZHC, so
+they go through the branded-reuse path. A standard-cluster device that is
+*not* upstream is reported to the developer for manual handling, not guessed
+at.
+
+**Already supported upstream → Maxsen-branded reuse** *(Claude's call; the
+user can override)*: customers of a Maxsen add-on service should see "Maxsen
+<model>" in HA, not another brand. When the fingerprint exists in ZHC, the
+skill generates a small external converter that reuses the upstream
+definition (ZHC's white-label pattern or an equivalent wrapper) under Maxsen
+vendor/model names, and adds any Maxsen-specific features the upstream
+definition lacks (e.g. screen labels). Tests confirm it still matches the
+fingerprint and exposes at least everything upstream does.
 
 **Icons** *(Claude's call)*: deferred. Icons might be an enum, an index per
 gang, or a bitmap upload, and the reference devices don't cover them. The
@@ -145,8 +168,9 @@ real DP definition exists.
 2. Normalize it into `datapoints/<model>.json`; list anything ambiguous and ask
    the developer rather than guessing (e.g. label encoding).
 3. Check upstream: search the pinned ZHC for the fingerprint. If supported,
-   report the existing model and stop unless told to continue.
-4. Generate `src/devices/<model>.mjs` from shared helpers; build
+   report the existing model and take the branded-reuse path.
+4. Otherwise generate `src/devices/<model>.mjs` — category helpers where they
+   fit, generic DP→expose mapping for everything else — and build
    `converters/<model>.mjs`.
 5. Generate tests; run them until green.
 6. Write `docs/devices/<model>.md` including the hardware checklist, status
@@ -159,9 +183,13 @@ frame produced for a sample value (DP id, type, payload bytes — including labe
 text encoding and length limit); for each reported DP, assert the decoded HA
 state.
 
-**Example device:** `example-sw4-lcd` (fictional), 4 gangs, per-gang switch +
-label text, scene labels, backlight, built from an M8Pro-like DP layout.
-Proves the whole pipeline end to end.
+**Example devices** (all fictional, clearly marked):
+- `example-sw4-lcd`: 4-gang screen switch: per-gang switch + label text,
+  scene labels, backlight (M8Pro-like DP layout). Proves the screen path.
+- `example-plug-meter` (all-DP plug with power/energy metering) and
+  `example-curtain` (all-DP curtain motor). Prove the generic, non-switch path.
+- One branded-reuse example wrapping an existing upstream device. Proves the
+  upstream path.
 
 ## Left to the builder
 
@@ -171,4 +199,7 @@ Proves the whole pipeline end to end.
 - Exact parsing of the Tuya platform export (support what the platform
   produces; the CSV template covers hand entry).
 - Which ZHC version to pin (latest compatible with current Z2M add-on).
+- Which categories get a dedicated helper in v1 beyond switch/screen/
+  backlight (metering, cover, thermostat are suggested; the generic path must
+  work without them).
 - Wording/structure of `CLAUDE.md` and the skill, within the workflow above.

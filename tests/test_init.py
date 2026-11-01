@@ -2,9 +2,13 @@
 
 from pathlib import Path
 
+from unittest.mock import patch
+
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.maxsen.const import DOMAIN
+from custom_components.maxsen.package import PackageError
 from custom_components.maxsen.store import MaxsenStore
 from homeassistant.config_entries import ConfigEntryState
 
@@ -72,15 +76,24 @@ async def test_setup_without_package_or_store_still_succeeds(hass):
     assert entry.runtime_data.data["package"] is None
 
 
-async def test_setup_with_corrupt_images_fails_the_entry(hass, home_package):
+@pytest.mark.parametrize("failure", [OSError("disk full"), PackageError("wrong_format")])
+async def test_failed_save_errors_the_entry_and_keeps_the_package(
+    hass, home_package, failure
+):
     entry = make_entry(hass)
-    home_package["images"]["file-l1"]["data"] = "not base64!"
     hass.data.setdefault(DOMAIN, {}).setdefault("pending", {})[
         "proj-test-house"
     ] = home_package
 
-    assert not await hass.config_entries.async_setup(entry.entry_id)
+    with patch("custom_components.maxsen.save_images", side_effect=failure):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
     assert entry.state is ConfigEntryState.SETUP_ERROR
+
+    # The package is not dropped, so a reload does not quietly give an empty home.
+    assert hass.data[DOMAIN]["pending"]["proj-test-house"] is home_package
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    assert entry.runtime_data.data["package"]["project"]["id"] == "proj-test-house"
+    assert hass.data[DOMAIN]["pending"] == {}
 
 
 async def test_store_round_trip(hass):

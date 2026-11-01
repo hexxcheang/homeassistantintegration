@@ -107,6 +107,11 @@ def parse_package(raw: bytes) -> dict:
         for plan in level["plans"]:
             if plan["background"]["imageId"] not in images:
                 raise PackageError("missing_image")
+    for image in images.values():
+        try:
+            base64.b64decode(image["data"], validate=True)
+        except (binascii.Error, ValueError) as err:
+            raise PackageError("wrong_format") from err
     return pkg
 
 

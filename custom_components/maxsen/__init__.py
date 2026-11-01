@@ -21,18 +21,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> bo
     entry (and so its folder and store) only exists from now on.
     """
     pending = hass.data.get(DOMAIN, {}).get("pending", {})
-    package = pending.pop(entry.data[CONF_PROJECT_ID], None)
+    package = pending.get(entry.data[CONF_PROJECT_ID])
 
     store = MaxsenStore(hass, entry.entry_id)
     await store.async_load()
     if package is not None:
+        # The package stays pending until it is saved, so a failed save is
+        # reported again on every retry instead of leaving a silently empty home.
         try:
             slim = await save_images(hass, entry.entry_id, package)
-        except PackageError as err:
+            await store.async_save_package(slim)
+        except (PackageError, OSError) as err:
             raise ConfigEntryError(
-                translation_domain=DOMAIN, translation_key="invalid_package"
+                translation_domain=DOMAIN, translation_key="save_failed"
             ) from err
-        await store.async_save_package(slim)
+        pending.pop(entry.data[CONF_PROJECT_ID], None)
 
     entry.runtime_data = store
     return True

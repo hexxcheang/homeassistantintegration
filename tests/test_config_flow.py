@@ -156,6 +156,46 @@ async def test_pair_not_ready_shows_the_planner_message_and_retry_reuses_the_pai
     assert [call[0] for call in aioclient_mock.mock_calls] == ["GET"]
 
 
+async def test_pair_revoked_on_download_is_bad_code_and_retry_pairs_again(
+    hass, aioclient_mock, home_package
+):
+    aioclient_mock.post(PAIR_URL, json=PAIRED)
+    aioclient_mock.get(HOME_URL, status=401, json={"error": "revoked"})
+
+    result = await start(hass, "pair")
+    result = await submit_pair(hass, result["flow_id"])
+    assert result["errors"] == {"base": "bad_code"}
+
+    # The pairing is thrown away, so the retry pairs again with the new code.
+    aioclient_mock.clear_requests()
+    aioclient_mock.post(PAIR_URL, json={**PAIRED, "token": "second-token"})
+    aioclient_mock.get(HOME_URL, json=home_package)
+    result = await submit_pair(hass, result["flow_id"], code="NEWCODE")
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["token"] == "second-token"
+    assert [call[0] for call in aioclient_mock.mock_calls] == ["POST", "GET"]
+
+
+async def test_pair_too_many_on_download_keeps_the_pairing(
+    hass, aioclient_mock, home_package
+):
+    aioclient_mock.post(PAIR_URL, json=PAIRED)
+    aioclient_mock.get(HOME_URL, status=429, json={"error": "too-many"})
+
+    result = await start(hass, "pair")
+    result = await submit_pair(hass, result["flow_id"])
+    assert result["errors"] == {"base": "too_many"}
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(HOME_URL, json=home_package)
+    result = await submit_pair(hass, result["flow_id"])
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["token"] == "secret-token"
+    assert [call[0] for call in aioclient_mock.mock_calls] == ["GET"]
+
+
 async def test_pair_home_download_failure_is_cannot_connect(hass, aioclient_mock):
     aioclient_mock.post(PAIR_URL, json=PAIRED)
     aioclient_mock.get(HOME_URL, status=503)
@@ -279,6 +319,20 @@ async def test_upload_missing_image_is_invalid_file(hass, tmp_path, home_package
     )
 
     assert result["errors"] == {"base": "invalid_file"}
+
+
+async def test_upload_corrupt_image_data_is_invalid_file(hass, tmp_path, home_package):
+    home_package["images"]["file-l1"]["data"] = "***not base64***"
+
+    result = await start(hass, "upload")
+    result = await submit_upload(
+        hass, result["flow_id"], tmp_path, json.dumps(home_package).encode()
+    )
+
+    assert result["errors"] == {"base": "invalid_file"}
+    assert hass.config_entries.async_entries(DOMAIN) == []
+    assert written_files(hass) == []
+    assert DOMAIN not in hass.data or not hass.data[DOMAIN].get("pending")
 
 
 async def test_upload_unknown_file_id_is_invalid_file(hass):

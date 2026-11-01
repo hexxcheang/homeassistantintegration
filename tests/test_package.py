@@ -186,6 +186,11 @@ async def test_save_images_bad_base64_writes_nothing(hass, home_package, tmp_pat
     assert not (tmp_path / "maxsen").exists()
 
 
+def test_corrupt_base64_is_wrong_format(home_package):
+    home_package["images"]["file-l2"]["data"] = "***not base64***"
+    assert reason_of(to_raw(home_package)) == "wrong_format"
+
+
 def test_element_index(home_package):
     index = element_index(home_package)
     assert set(index) == {

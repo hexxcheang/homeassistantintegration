@@ -57,8 +57,8 @@
     }
   },
   "exceptions": {
-    "invalid_package": {
-      "message": "The saved home file is damaged. Remove this home and add it again."
+    "save_failed": {
+      "message": "The home could not be saved. Remove this home and add it again."
     }
   }
 }

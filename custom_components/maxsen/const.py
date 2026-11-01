@@ -7,6 +7,15 @@ PACKAGE_FORMAT = "maxsen-home"
 PACKAGE_SCHEMA_VERSION = 1
 MAX_PACKAGE_BYTES = 100 * 1024 * 1024
 
+# Config entry data keys and values.
+CONF_SOURCE = "source"
+CONF_PLANNER_URL = "planner_url"
+CONF_TOKEN = "token"
+CONF_PROJECT_ID = "project_id"
+CONF_TITLE = "title"
+SOURCE_PLANNER = "planner"
+SOURCE_FILE = "file"
+
 # Options.
 CONF_INSTALLER_MODE = "installer_mode"
 

@@ -1,0 +1,64 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a Maxsen home",
+        "description": "How do you want to bring in the home?",
+        "menu_options": {
+          "pair": "Pair with the Maxsen Planner",
+          "upload": "Upload a home file"
+        }
+      },
+      "pair": {
+        "title": "Pair with the Maxsen Planner",
+        "description": "In the planner, open the project and create a pairing code for Home Assistant.",
+        "data": {
+          "planner_url": "Planner address",
+          "code": "Pairing code"
+        },
+        "data_description": {
+          "planner_url": "The web address of your Maxsen Planner, starting with https://",
+          "code": "The code shown in the planner. It works once."
+        }
+      },
+      "upload": {
+        "title": "Upload a home file",
+        "description": "Choose the home file (.json) exported from the Maxsen Planner.",
+        "data": {
+          "file": "Home file"
+        }
+      }
+    },
+    "error": {
+      "bad_code": "That code did not work. Check it, or create a new one in the planner.",
+      "too_many": "Too many tries. Wait a minute and try again.",
+      "cannot_connect": "Could not reach the planner. Check the address and your connection.",
+      "not_ready": "The planner has no home to send yet: {message}",
+      "invalid_url": "Enter the planner address starting with https://",
+      "invalid_file": "This is not a Maxsen home file.",
+      "unsupported_version": "This home file is from a newer planner. Update this integration.",
+      "too_large": "This file is larger than 100 MB."
+    },
+    "abort": {
+      "already_configured": "This home is already added."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Maxsen Home options",
+        "data": {
+          "installer_mode": "Installer mode"
+        },
+        "data_description": {
+          "installer_mode": "Lets administrators link plan elements to devices and refresh from the planner."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_package": {
+      "message": "The saved home file is damaged. Remove this home and add it again."
+    }
+  }
+}

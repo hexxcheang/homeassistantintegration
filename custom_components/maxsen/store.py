@@ -21,7 +21,13 @@ PREVIEW_LIFETIME = timedelta(minutes=10)
 
 
 def _empty() -> dict[str, Any]:
-    return {"package": None, "links": {}, "quick_panel": [], "scenes": []}
+    return {
+        "package": None,
+        "links": {},
+        "quick_panel": [],
+        "scenes": [],
+        "display": {"background": "soft"},
+    }
 
 
 class MaxsenStore:
@@ -107,6 +113,11 @@ class MaxsenStore:
         """Replace the shared quick-panel list."""
         await self._async_write(lambda _: {"quick_panel": list(items)})
         self._announce_quick_panel()
+
+    async def async_set_display(self, display: dict[str, str]) -> None:
+        """Replace the display settings shared by every screen of this home."""
+        await self._async_write(lambda _: {"display": dict(display)})
+        self._announce("home")
 
     async def async_rebuild_starter_scenes(self) -> list[StarterScene]:
         """Replace the starter scenes with ones built from the package and links as they are now."""

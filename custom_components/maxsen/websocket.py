@@ -64,6 +64,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_home)
     websocket_api.async_register_command(hass, ws_links_set)
     websocket_api.async_register_command(hass, ws_quick_panel_set)
+    websocket_api.async_register_command(hass, ws_display_set)
     websocket_api.async_register_command(hass, ws_subscribe)
     websocket_api.async_register_command(hass, ws_refresh_preview)
     websocket_api.async_register_command(hass, ws_refresh_apply)
@@ -103,7 +104,7 @@ def _installer_only(
 def ws_home(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Return the home for the card: package, links, quick panel, where it came from and image URLs."""
+    """Return the home for the card: package, links, quick panel, display setting, where it came from and image URLs."""
     if (entry := _loaded_entry_or_error(hass, connection, msg)) is None:
         return
     data = entry.runtime_data.data
@@ -115,6 +116,7 @@ def ws_home(
             "package": package,
             "links": data["links"],
             "quick_panel": data["quick_panel"],
+            "display": data["display"],
             "installer_mode": bool(entry.options.get(CONF_INSTALLER_MODE, False)),
             "source": entry.data[CONF_SOURCE],
             "image_urls": {
@@ -171,6 +173,28 @@ async def ws_quick_panel_set(
     store = entry.runtime_data
     await store.async_set_quick_panel(msg["items"])
     connection.send_result(msg["id"], {"quick_panel": store.data["quick_panel"]})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "maxsen/display/set",
+        vol.Required("entry_id"): str,
+        vol.Required("background"): vol.In(["soft", "original"]),
+    }
+)
+@websocket_api.async_response
+async def ws_display_set(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Choose how floor plan backgrounds look on every screen. Needs an admin and installer mode, checked here."""
+    if (entry := _loaded_entry_or_error(hass, connection, msg)) is None:
+        return
+    if not _installer_only(connection, msg, entry, "Changing the display"):
+        return
+
+    store = entry.runtime_data
+    await store.async_set_display({"background": msg["background"]})
+    connection.send_result(msg["id"], {"display": store.data["display"]})
 
 
 @websocket_api.websocket_command(

@@ -113,6 +113,7 @@ async def test_unknown_unloaded_or_foreign_entries_are_not_found(
             ("maxsen/home", {}),
             ("maxsen/links/set", {"updates": {}}),
             ("maxsen/quick_panel/set", {"items": []}),
+            ("maxsen/display/set", {"background": "soft"}),
             ("maxsen/subscribe", {}),
         ):
             resp = await call(ws, type_, entry_id=entry_id, **extra)
@@ -224,6 +225,86 @@ async def test_links_set_rejects_malformed_links(hass, hass_ws_client, entry, li
     assert not resp["success"]
     assert resp["error"]["code"] == "invalid_format"
     assert entry.runtime_data.data["links"] == {}
+
+
+# --------------------------------------------------------- maxsen/display/set
+
+
+async def test_home_shows_the_soft_background_for_a_store_saved_before_the_setting(
+    hass, hass_ws_client, hass_storage, entry
+):
+    key = f"maxsen.{entry.entry_id}"
+    assert "display" in hass_storage[key]["data"]
+    del hass_storage[key]["data"]["display"]
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    ws = await hass_ws_client()
+    resp = await call(ws, "maxsen/home", entry_id=entry.entry_id)
+    assert resp["result"]["display"] == {"background": "soft"}
+
+
+async def test_display_set_saves_persists_and_tells_subscribers(
+    hass, hass_ws_client, entry
+):
+    ws = await hass_ws_client()
+    await ws.send_json_auto_id({"type": "maxsen/subscribe", "entry_id": entry.entry_id})
+    assert (await ws.receive_json())["success"]
+
+    await ws.send_json_auto_id(
+        {"type": "maxsen/display/set", "entry_id": entry.entry_id, "background": "original"}
+    )
+    # The event goes out as soon as the setting is saved, before the reply.
+    first, second = await ws.receive_json(), await ws.receive_json()
+    pushed, resp = (first, second) if first["type"] == "event" else (second, first)
+    assert pushed["event"] == {"event": "home"}
+    assert resp["success"]
+    assert resp["result"] == {"display": {"background": "original"}}
+
+    home = await call(ws, "maxsen/home", entry_id=entry.entry_id)
+    assert home["result"]["display"] == {"background": "original"}
+
+    reloaded = MaxsenStore(hass, entry.entry_id)
+    await reloaded.async_load()
+    assert reloaded.data["display"] == {"background": "original"}
+
+
+async def test_display_set_needs_an_admin(
+    hass, hass_ws_client, hass_read_only_access_token, entry
+):
+    # Review focus 5: a wall panel user cannot change the setting.
+    ws = await hass_ws_client(hass, hass_read_only_access_token)
+    resp = await call(
+        ws, "maxsen/display/set", entry_id=entry.entry_id, background="original"
+    )
+    assert not resp["success"]
+    assert resp["error"]["code"] == "not_allowed"
+    assert entry.runtime_data.data["display"] == {"background": "soft"}
+
+
+async def test_display_set_needs_installer_mode(hass, hass_ws_client, home_package):
+    # Review focus 5: an admin with installer mode off cannot change it either.
+    entry = await setup_entry(hass, home_package, installer_mode=False)
+    ws = await hass_ws_client()
+    resp = await call(
+        ws, "maxsen/display/set", entry_id=entry.entry_id, background="original"
+    )
+    assert not resp["success"]
+    assert resp["error"]["code"] == "not_allowed"
+    assert entry.runtime_data.data["display"] == {"background": "soft"}
+
+
+@pytest.mark.parametrize("background", ["dark", "", None, 1])
+async def test_display_set_rejects_unknown_backgrounds(
+    hass, hass_ws_client, entry, background
+):
+    ws = await hass_ws_client()
+    resp = await call(
+        ws, "maxsen/display/set", entry_id=entry.entry_id, background=background
+    )
+    assert not resp["success"]
+    assert resp["error"]["code"] == "invalid_format"
+    assert entry.runtime_data.data["display"] == {"background": "soft"}
 
 
 # ------------------------------------------------------ maxsen/quick_panel/set

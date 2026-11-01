@@ -99,7 +99,13 @@ async def test_failed_save_errors_the_entry_and_keeps_the_package(
 async def test_store_round_trip(hass):
     store = MaxsenStore(hass, "abc")
     await store.async_load()
-    assert store.data == {"package": None, "links": {}, "quick_panel": [], "scenes": []}
+    assert store.data == {
+        "package": None,
+        "links": {},
+        "quick_panel": [],
+        "scenes": [],
+        "display": {"background": "soft"},
+    }
 
     await store.async_save_package({"project": {"id": "p"}})
 

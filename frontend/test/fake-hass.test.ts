@@ -253,6 +253,46 @@ describe('createFakeHass: websocket', () => {
     }
   });
 
+  it('maxsen/home carries the display setting, soft by default', async () => {
+    expect((await getHome(createFakeHass(fresh(), admin))).display).toEqual({ background: 'soft' });
+  });
+
+  it('maxsen/display/set saves the background, answers with it and tells subscribers', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const events: string[] = [];
+    await fake.connection.subscribeMessage<{ event: string }>((m) => events.push(m.event), {
+      type: 'maxsen/subscribe',
+      entry_id: ENTRY,
+    });
+    const result = await ws(fake, { type: 'maxsen/display/set', background: 'original' });
+    expect(result).toEqual({ display: { background: 'original' } });
+    expect((await getHome(fake)).display).toEqual({ background: 'original' });
+    expect(events).toEqual(['home']);
+  });
+
+  it('maxsen/display/set rejects with not_allowed unless admin and installer mode', async () => {
+    for (const opts of [
+      { admin: false, installerMode: true },
+      { admin: true, installerMode: false },
+    ]) {
+      const fake = createFakeHass(fresh(), opts);
+      await expect(
+        ws(fake, { type: 'maxsen/display/set', background: 'original' }),
+      ).rejects.toMatchObject({ code: 'not_allowed' });
+      expect((await getHome(fake)).display).toEqual({ background: 'soft' });
+    }
+  });
+
+  it('maxsen/display/set rejects an unknown background with invalid_format', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    for (const background of ['dark', '', null, 1, undefined]) {
+      await expect(
+        ws(fake, { type: 'maxsen/display/set', background }),
+      ).rejects.toMatchObject({ code: 'invalid_format' });
+    }
+    expect((await getHome(fake)).display).toEqual({ background: 'soft' });
+  });
+
   it('maxsen/links/set links, unlinks and checks element ids', async () => {
     const fake = createFakeHass(fresh(), admin);
     const link: Link = { type: 'entity', id: 'switch.entrance_switch_1' };

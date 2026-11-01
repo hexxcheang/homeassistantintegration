@@ -10,6 +10,7 @@ import { PackageProblem, parseHomeFile } from './validate-package.ts';
 import type {
   ChangedDrawing,
   ChangedElement,
+  DisplaySettings,
   HassArea,
   HassDevice,
   HassEntity,
@@ -358,6 +359,7 @@ export function createFakeHass(
   let scenes: StarterScene[] = [];
   /** Scene entity id to the starter scene behind it. */
   let sceneEntities = new Map<string, StarterScene>();
+  let display: DisplaySettings = { background: 'soft' };
   let installerMode = opts.installerMode;
   /** Where the home came from: the sample home plays a planner project; an opened file is a file. */
   let source: HomeResponse['source'] = 'planner';
@@ -486,6 +488,7 @@ export function createFakeHass(
       package: stored,
       links,
       quick_panel: quickPanel,
+      display,
       installer_mode: installerMode,
       source,
       image_urls: Object.fromEntries(
@@ -540,6 +543,18 @@ export function createFakeHass(
     quickPanel = items.map(({ type, id }) => ({ type, id }));
     emit('quick_panel');
     return { quick_panel: structuredClone(quickPanel) };
+  }
+
+  function setDisplay(msg: Message): unknown {
+    const background = msg['background'];
+    if (background !== 'soft' && background !== 'original') {
+      throw new CommandError('invalid_format', 'background must be "soft" or "original"');
+    }
+    requireHome(msg);
+    requireInstaller('Changing the display');
+    display = { background };
+    emit('home');
+    return { display: structuredClone(display) };
   }
 
   /** Replace the scene entities with ones for `next`. Returns the entity ids of the new scenes. */
@@ -691,6 +706,8 @@ export function createFakeHass(
           return setLinks(msg);
         case 'maxsen/quick_panel/set':
           return setQuickPanel(msg);
+        case 'maxsen/display/set':
+          return setDisplay(msg);
         case 'maxsen/scenes/create_starter':
           return createStarter(msg);
         case 'maxsen/refresh/preview':
@@ -776,6 +793,7 @@ export function createFakeHass(
       revoked = false;
       links = nextLinks;
       quickPanel = [];
+      display = { background: 'soft' };
       scenes = [];
       sceneEntities = new Map();
       files.clear();

@@ -1,4 +1,4 @@
-import type { HassLike, HomeResponse, Link, QuickItem, RefreshSummary } from './types.ts';
+import type { DisplayBackground, DisplaySettings, HassLike, HomeResponse, Link, QuickItem, RefreshSummary } from './types.ts';
 
 /** What changed on the server; the view reloads the home on any of them. */
 export type HomeEvent = 'home' | 'links' | 'quick_panel';
@@ -60,6 +60,15 @@ export function setQuickPanel(
   items: QuickItem[],
 ): Promise<{ quick_panel: QuickItem[] }> {
   return hass.callWS({ type: 'maxsen/quick_panel/set', entry_id: entryId, items });
+}
+
+/** Choose how plan backgrounds look for every screen of this home. Installer mode only. */
+export function setDisplay(
+  hass: HassLike,
+  entryId: string,
+  background: DisplayBackground,
+): Promise<{ display: DisplaySettings }> {
+  return hass.callWS({ type: 'maxsen/display/set', entry_id: entryId, background });
 }
 
 /** Fetch the planner's current home and report what would change. `fileId` is for homes loaded from a file. */

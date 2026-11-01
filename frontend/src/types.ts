@@ -232,11 +232,20 @@ export interface QuickItem {
 }
 
 /** The `maxsen/home` result. */
+/** How a plan's background drawing is shown: `soft` fades it back, `original` shows it as drawn. */
+export type DisplayBackground = 'soft' | 'original';
+
+export interface DisplaySettings {
+  background: DisplayBackground;
+}
+
 export interface HomeResponse {
   package: StoredHomePackage | null;
   /** Planner element id to its link; unlinked elements are absent. */
   links: Record<string, Link>;
   quick_panel: QuickItem[];
+  /** How the floor plan looks on every screen of this home. */
+  display: DisplaySettings;
   installer_mode: boolean;
   /** Where the home came from: fetched from the planner, or loaded from a file. */
   source: 'planner' | 'file';

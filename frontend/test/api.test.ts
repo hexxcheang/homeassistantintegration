@@ -6,6 +6,7 @@ import {
   loadImage,
   refreshApply,
   refreshPreview,
+  setDisplay,
   setLinks,
   setQuickPanel,
   subscribe,
@@ -27,6 +28,7 @@ describe('websocket wrappers', () => {
     await refreshPreview(hass, 'e1', 'file-9');
     await refreshApply(hass, 'e1', 'p1');
     await createStarterScenes(hass, 'e1');
+    await setDisplay(hass, 'e1', 'original');
 
     expect(callWS.mock.calls.map((c) => c[0])).toEqual([
       { type: 'maxsen/home', entry_id: 'e1' },
@@ -40,6 +42,7 @@ describe('websocket wrappers', () => {
       { type: 'maxsen/refresh/preview', entry_id: 'e1', file_id: 'file-9' },
       { type: 'maxsen/refresh/apply', entry_id: 'e1', preview_id: 'p1' },
       { type: 'maxsen/scenes/create_starter', entry_id: 'e1' },
+      { type: 'maxsen/display/set', entry_id: 'e1', background: 'original' },
     ]);
   });
 

@@ -148,7 +148,7 @@ What the integration says, and what to do:
 | Message | What to do |
 | --- | --- |
 | That code did not work. Check it, or create a new one in the planner. | Check the characters. A code works once and runs out after 24 hours; create a new one. |
-| Too many tries. Wait a minute and try again. | Wait, then try again. |
+| Too many tries. Wait 15 minutes, then try again. | Wait 15 minutes, then try again. |
 | Could not reach the planner. Check the address and your connection. | Check the **Planner address** and that Home Assistant has internet. |
 | Enter the planner address starting with https:// | Use the full address, for example `https://planner.example.com`. Plain `http://` is accepted only for `localhost` and `127.0.0.1`. |
 | The planner has no home to send yet: … | Follow the planner's message, usually "Save this project to the team first." |

@@ -94,6 +94,17 @@ async def test_pair_errors(hass, aioclient_mock, status, error):
     assert written_files(hass) == []
 
 
+@pytest.mark.parametrize("name", ["strings.json", "translations/en.json"])
+def test_too_many_says_how_long_to_wait(name):
+    """The planner's rate-limit window is 15 minutes."""
+    folder = Path(__file__).parent.parent / "custom_components" / "maxsen"
+    strings = json.loads((folder / name).read_text())
+    assert (
+        strings["config"]["error"]["too_many"]
+        == "Too many tries. Wait 15 minutes, then try again."
+    )
+
+
 async def test_pair_timeout_is_cannot_connect(hass, aioclient_mock):
     aioclient_mock.post(PAIR_URL, exc=TimeoutError())
 

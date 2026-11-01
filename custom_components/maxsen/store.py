@@ -67,7 +67,10 @@ class MaxsenStore:
         """Change ``data``: build the changed keys from the current data, save, then assign.
 
         One writer at a time, so no change is built from a stale copy and lost.
-        When saving fails, memory still matches what is on disk.
+        Home Assistant's Store does not raise when the file cannot be written (it
+        logs the WriteError), so memory can then be ahead of what is on disk until
+        the next save succeeds. Only an error the Store does raise leaves ``data``
+        as it was.
         """
         async with self._write_lock:
             new_data = {**self.data, **build(self.data)}

@@ -13,10 +13,11 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
-from .const import CONF_PROJECT_ID, DOMAIN
+from .const import CONF_PROJECT_ID, DOMAIN, SIGNAL_UPDATED
 from .http import MaxsenImageView
 from .package import PackageError, save_images
 from .store import MaxsenStore
@@ -95,8 +96,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> bo
     store = MaxsenStore(hass, entry.entry_id)
     await store.async_load()
     if package is not None:
-        # The package stays pending until it is saved, so a failed save is
+        # The package stays pending until it is saved, so a failed image write is
         # reported again on every retry instead of leaving a silently empty home.
+        # (A failed store write is only logged by Home Assistant's Store.)
         try:
             slim = await save_images(hass, entry.entry_id, package)
             await store.async_save_package(slim)
@@ -107,9 +109,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> bo
         pending.pop(entry.data[CONF_PROJECT_ID], None)
 
     entry.runtime_data = store
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     await _async_ensure_panel(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _async_entry_updated(hass: HomeAssistant, entry: MaxsenConfigEntry) -> None:
+    """Tell open panels the home changed, so they pick up installer mode at once."""
+    async_dispatcher_send(hass, SIGNAL_UPDATED.format(entry_id=entry.entry_id), "home")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> bool:

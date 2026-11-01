@@ -1,9 +1,11 @@
 """Tests for home package parsing, image saving and diffing."""
 
+import asyncio
 import base64
 import copy
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -158,6 +160,26 @@ async def test_save_images_writes_files_and_strips_data(hass, home_package, tmp_
     assert saved["project"] == original["project"]
     # The input package is left untouched.
     assert home_package == original
+
+
+async def test_save_images_decodes_off_the_event_loop(hass, home_package, tmp_path):
+    """Decoding up to 100 MB of base64 must not block the event loop."""
+    hass.config.config_dir = str(tmp_path)
+    decoded_on_loop: list[bool] = []
+    real = base64.b64decode
+
+    def spy(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+            decoded_on_loop.append(True)
+        except RuntimeError:
+            decoded_on_loop.append(False)
+        return real(*args, **kwargs)
+
+    with patch("custom_components.maxsen.package.base64.b64decode", spy):
+        await save_images(hass, "entry1", home_package)
+
+    assert decoded_on_loop == [False, False]
 
 
 async def test_save_images_extension_follows_media_type(hass, home_package, tmp_path):

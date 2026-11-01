@@ -120,20 +120,15 @@ def parse_package(raw: bytes) -> dict:
     return pkg
 
 
-def _write_images(folder: Path, decoded: dict[str, tuple[str, bytes]]) -> None:
-    folder.mkdir(parents=True, exist_ok=True)
-    for file_name, (_, data) in decoded.items():
-        (folder / file_name).write_bytes(data)
+def _decode_and_write_images(folder: Path, images: dict[str, dict]) -> dict[str, str]:
+    """Decode every image, then write them all; return image id to media type.
 
-
-async def save_images(hass: HomeAssistant, entry_id: str, pkg: dict) -> dict:
-    """Write the package images to disk and return the package without image data.
-
-    The result has no ``images`` key; ``image_types`` maps image id to media type.
+    Runs in the executor: decoding up to 100 MB of base64 would block the event
+    loop. Nothing is written unless every image decodes.
     """
-    decoded: dict[str, tuple[str, bytes]] = {}
+    decoded: dict[str, bytes] = {}
     image_types: dict[str, str] = {}
-    for image_id, image in pkg["images"].items():
+    for image_id, image in images.items():
         media_type = image["mediaType"]
         try:
             data = base64.b64decode(image["data"], validate=True)
@@ -141,12 +136,23 @@ async def save_images(hass: HomeAssistant, entry_id: str, pkg: dict) -> dict:
             raise PackageError("wrong_format") from err
         if media_type not in IMAGE_EXTENSIONS or not IMAGE_ID_PATTERN.match(image_id):
             raise PackageError("wrong_format")
-        ext = IMAGE_EXTENSIONS[media_type]
-        decoded[f"{image_id}.{ext}"] = (media_type, data)
+        decoded[f"{image_id}.{IMAGE_EXTENSIONS[media_type]}"] = data
         image_types[image_id] = media_type
+    folder.mkdir(parents=True, exist_ok=True)
+    for file_name, data in decoded.items():
+        (folder / file_name).write_bytes(data)
+    return image_types
 
+
+async def save_images(hass: HomeAssistant, entry_id: str, pkg: dict) -> dict:
+    """Write the package images to disk and return the package without image data.
+
+    The result has no ``images`` key; ``image_types`` maps image id to media type.
+    """
     folder = Path(hass.config.path("maxsen", entry_id))
-    await hass.async_add_executor_job(_write_images, folder, decoded)
+    image_types = await hass.async_add_executor_job(
+        _decode_and_write_images, folder, pkg["images"]
+    )
 
     slim = {key: value for key, value in pkg.items() if key != "images"}
     slim["image_types"] = image_types

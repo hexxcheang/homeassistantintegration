@@ -316,6 +316,25 @@ async def test_subscription_also_reports_links_and_home_changes(
     assert (await ws.receive_json())["event"] == {"event": "home"}
 
 
+async def test_an_options_change_tells_subscribers_the_home_changed(
+    hass, hass_ws_client, entry
+):
+    """Open panels pick up installer mode being switched off (or on) at once."""
+    ws = await hass_ws_client()
+    await ws.send_json_auto_id({"type": "maxsen/subscribe", "entry_id": entry.entry_id})
+    assert (await ws.receive_json())["success"]
+
+    hass.config_entries.async_update_entry(entry, options={"installer_mode": False})
+    await hass.async_block_till_done()
+    # Without the event, the next message would be the answer to this ping.
+    await ws.send_json_auto_id({"type": "ping"})
+
+    assert (await ws.receive_json()).get("event") == {"event": "home"}
+    assert (await ws.receive_json())["type"] == "pong"
+    resp = await call(ws, "maxsen/home", entry_id=entry.entry_id)
+    assert resp["result"]["installer_mode"] is False
+
+
 async def test_subscription_is_only_for_its_own_entry(
     hass, hass_ws_client, home_package, entry
 ):

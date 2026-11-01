@@ -43,7 +43,7 @@
     },
     "error": {
       "bad_code": "That code did not work. Check it, or create a new one in the planner.",
-      "too_many": "Too many tries. Wait a minute and try again.",
+      "too_many": "Too many tries. Wait 15 minutes, then try again.",
       "cannot_connect": "Could not reach the planner. Check the address and your connection.",
       "not_ready": "The planner has no home to send yet: {message}",
       "invalid_url": "Enter the planner address starting with https://",

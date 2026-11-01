@@ -318,6 +318,8 @@ async def ws_refresh_apply(
             slim = await save_images(hass, entry.entry_id, package)
             scenes_changed = await store.async_apply_refresh(slim, removed_ids)
         except (PackageError, OSError):
+            # Writing the images can fail here. A failed store write does not
+            # raise: Home Assistant's Store only logs it.
             _LOGGER.warning("Could not save the refreshed home", exc_info=True)
             connection.send_error(
                 msg["id"], "save_failed", "Could not save the refreshed home"

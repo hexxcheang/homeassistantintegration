@@ -23,6 +23,7 @@ from .const import (
     SOURCE_PLANNER,
 )
 from .entries import get_loaded_entry
+from .scene import async_create_starter_scenes, async_reload_scenes
 from .package import (
     PackageError,
     describe_changes,
@@ -66,6 +67,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_subscribe)
     websocket_api.async_register_command(hass, ws_refresh_preview)
     websocket_api.async_register_command(hass, ws_refresh_apply)
+    websocket_api.async_register_command(hass, ws_scenes_create_starter)
 
 
 def _loaded_entry_or_error(
@@ -310,7 +312,7 @@ async def ws_refresh_apply(
         removed_ids = {element["id"] for element in summary["removed"]}
         try:
             slim = await save_images(hass, entry.entry_id, package)
-            await store.async_apply_refresh(slim, removed_ids)
+            scenes_changed = await store.async_apply_refresh(slim, removed_ids)
         except (PackageError, OSError):
             _LOGGER.warning("Could not save the refreshed home", exc_info=True)
             connection.send_error(
@@ -321,5 +323,26 @@ async def ws_refresh_apply(
             await remove_unreferenced_images(hass, entry.entry_id, store.data["package"])
         except OSError:
             _LOGGER.warning("Could not delete old images", exc_info=True)
+        if scenes_changed:
+            await async_reload_scenes(hass, entry)
 
     connection.send_result(msg["id"], {"preview_id": msg["preview_id"], **summary})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "maxsen/scenes/create_starter", vol.Required("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_scenes_create_starter(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """(Re)create the starter scenes from the current links and show them on the quick panel."""
+    if (entry := _loaded_entry_or_error(hass, connection, msg)) is None:
+        return
+    if not _installer_only(connection, msg, entry, "Creating scenes"):
+        return
+
+    # Shared with refresh: both reload the scene entities, one at a time.
+    async with entry.runtime_data.refresh_lock:
+        scenes = await async_create_starter_scenes(hass, entry)
+    connection.send_result(msg["id"], {"scenes": scenes})

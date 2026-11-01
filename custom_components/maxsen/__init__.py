@@ -9,6 +9,7 @@ from pathlib import Path
 from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import config_validation as cv
@@ -29,6 +30,8 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 STATIC_URL = "/maxsen_static"
 PANEL_URL_PATH = "maxsen-home"
 PANEL_ELEMENT = "maxsen-home-panel"
+
+PLATFORMS = [Platform.SCENE]
 
 type MaxsenConfigEntry = ConfigEntry[MaxsenStore]
 
@@ -105,11 +108,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> bo
 
     entry.runtime_data = store
     await _async_ensure_panel(hass)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: MaxsenConfigEntry) -> bool:
     """Unload a config entry; the panel goes with the last one."""
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        return False
     # This entry is already out of the loaded list while it unloads.
     if not hass.config_entries.async_loaded_entries(DOMAIN):
         frontend.async_remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False)

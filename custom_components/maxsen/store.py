@@ -14,6 +14,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import EVENT_QUICK_PANEL_UPDATED, SIGNAL_UPDATED
+from .scene import StarterScene, build_starter_scenes, starter_entity_ids
 
 STORAGE_VERSION = 1
 PREVIEW_LIFETIME = timedelta(minutes=10)
@@ -73,6 +74,12 @@ class MaxsenStore:
             await self._store.async_save(new_data)
             self.data = new_data
 
+    def _announce_quick_panel(self) -> None:
+        self._announce("quick_panel")
+        self._hass.bus.async_fire(
+            EVENT_QUICK_PANEL_UPDATED, {"entry_id": self._entry_id}
+        )
+
     async def async_save_package(self, pkg: dict[str, Any]) -> None:
         """Replace the saved package."""
         await self._async_write(lambda _: {"package": pkg})
@@ -96,10 +103,48 @@ class MaxsenStore:
     async def async_set_quick_panel(self, items: list[dict[str, str]]) -> None:
         """Replace the shared quick-panel list."""
         await self._async_write(lambda _: {"quick_panel": list(items)})
-        self._announce("quick_panel")
-        self._hass.bus.async_fire(
-            EVENT_QUICK_PANEL_UPDATED, {"entry_id": self._entry_id}
-        )
+        self._announce_quick_panel()
+
+    async def async_rebuild_starter_scenes(self) -> list[StarterScene]:
+        """Replace the starter scenes with ones built from the package and links as they are now."""
+
+        def build(data: dict[str, Any]) -> dict[str, Any]:
+            package = data["package"]
+            return {
+                "scenes": (
+                    build_starter_scenes(package, data["links"], self._hass)
+                    if package
+                    else []
+                )
+            }
+
+        await self._async_write(build)
+        return self.data["scenes"]
+
+    async def async_update_starter_panel(
+        self, add: list[str], remove: set[str]
+    ) -> None:
+        """Append scene entities to the quick panel unless already there; drop ``remove``."""
+        changed = False
+
+        def build(data: dict[str, Any]) -> dict[str, Any]:
+            nonlocal changed
+            panel = [
+                item
+                for item in data["quick_panel"]
+                if not (item["type"] == "entity" and item["id"] in remove)
+            ]
+            present = {(item["type"], item["id"]) for item in panel}
+            for entity_id in add:
+                if ("entity", entity_id) not in present:
+                    panel.append({"type": "entity", "id": entity_id})
+                    present.add(("entity", entity_id))
+            changed = panel != data["quick_panel"]
+            return {"quick_panel": panel}
+
+        await self._async_write(build)
+        if changed:
+            self._announce_quick_panel()
 
     def keep_preview(self, pkg: dict[str, Any]) -> str:
         """Hold a parsed package for ten minutes, replacing any earlier preview."""
@@ -122,27 +167,46 @@ class MaxsenStore:
 
     async def async_apply_refresh(
         self, slim: dict[str, Any], removed_ids: set[str]
-    ) -> None:
-        """Save a refreshed package and drop links and quick-panel items of removed elements."""
+    ) -> bool:
+        """Save a refreshed package and tidy what depended on the old one.
+
+        Links and quick-panel items of removed elements go. When starter scenes
+        exist they are rebuilt from the new package and the pruned links, and
+        quick-panel items for scenes that no longer exist go too. Returns whether
+        the starter scenes changed (the scene entities then need reloading).
+        """
         panel_changed = False
+        scenes_changed = False
 
         def build(data: dict[str, Any]) -> dict[str, Any]:
-            nonlocal panel_changed
+            nonlocal panel_changed, scenes_changed
+            links = {
+                element_id: link
+                for element_id, link in data["links"].items()
+                if element_id not in removed_ids
+            }
+            gone_entities: set[str] = set()
+            changes: dict[str, Any] = {"package": slim, "links": links}
+            if data["scenes"]:
+                scenes = build_starter_scenes(slim, links, self._hass)
+                kept = {scene["id"] for scene in scenes}
+                gone_entities = set(
+                    starter_entity_ids(
+                        self._hass,
+                        self._entry_id,
+                        [s for s in data["scenes"] if s["id"] not in kept],
+                    )
+                )
+                scenes_changed = scenes != data["scenes"]
+                changes["scenes"] = scenes
             panel = [
                 item
                 for item in data["quick_panel"]
                 if not (item["type"] == "element" and item["id"] in removed_ids)
+                and not (item["type"] == "entity" and item["id"] in gone_entities)
             ]
             panel_changed = len(panel) != len(data["quick_panel"])
-            return {
-                "package": slim,
-                "links": {
-                    element_id: link
-                    for element_id, link in data["links"].items()
-                    if element_id not in removed_ids
-                },
-                "quick_panel": panel,
-            }
+            return {**changes, "quick_panel": panel}
 
         await self._async_write(build)
         for event in ("home", "links", "quick_panel"):
@@ -151,3 +215,4 @@ class MaxsenStore:
             self._hass.bus.async_fire(
                 EVENT_QUICK_PANEL_UPDATED, {"entry_id": self._entry_id}
             )
+        return scenes_changed

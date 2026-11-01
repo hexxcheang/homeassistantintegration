@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { errorMessage, linkName } from '../src/hass-util.ts';
+import { deviceEntities, errorMessage, linkName } from '../src/hass-util.ts';
 import { makeHass } from './helpers.ts';
 
 describe('errorMessage', () => {
@@ -39,5 +39,23 @@ describe('linkName', () => {
   it('is undefined for something Home Assistant no longer has', () => {
     expect(linkName({ type: 'entity', id: 'switch.gone' }, hass)).toBeUndefined();
     expect(linkName({ type: 'device', id: 'gone' }, hass)).toBeUndefined();
+  });
+});
+
+describe('deviceEntities', () => {
+  it('leaves out config, diagnostic and hidden entities: they are settings, not the device', () => {
+    const hass = makeHass({
+      devices: { d1: {} },
+      entities: {
+        'switch.gang1': { device_id: 'd1' },
+        'switch.gang2': { device_id: 'd1', entity_category: null, hidden: false },
+        'switch.backlight': { device_id: 'd1', entity_category: 'config' },
+        'lock.child_lock': { device_id: 'd1', entity_category: 'config' },
+        'sensor.rssi': { device_id: 'd1', entity_category: 'diagnostic' },
+        'switch.hidden': { device_id: 'd1', hidden: true },
+        'switch.other': { device_id: 'd2' },
+      },
+    });
+    expect(deviceEntities(hass, 'd1').map((e) => e.entity_id)).toEqual(['switch.gang1', 'switch.gang2']);
   });
 });

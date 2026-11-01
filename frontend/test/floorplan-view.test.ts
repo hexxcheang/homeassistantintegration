@@ -336,6 +336,54 @@ describe('use mode', () => {
     await settle(view);
     expect(root(view).querySelector('.popup')).toBeNull();
   });
+
+  describe('a 2-gang switch with a config backlight and child lock', () => {
+    function tuyaHass() {
+      return withImages(
+        makeHass({
+          devices: { 'dev-tuya': { name: 'Tuya switch' } },
+          entities: {
+            'switch.gang1': { device_id: 'dev-tuya' },
+            'switch.gang2': { device_id: 'dev-tuya' },
+            'switch.backlight': { device_id: 'dev-tuya', entity_category: 'config' },
+            'lock.child_lock': { device_id: 'dev-tuya', entity_category: 'config' },
+          },
+          states: {
+            'switch.gang1': { state: 'off', attributes: { friendly_name: 'Left' } },
+            'switch.gang2': { state: 'off', attributes: { friendly_name: 'Right' } },
+            'switch.backlight': { state: 'on', attributes: { friendly_name: 'Backlight' } },
+            'lock.child_lock': { state: 'unlocked', attributes: { friendly_name: 'Child lock' } },
+          },
+        }),
+      );
+    }
+    const TUYA = { sw1: { type: 'device', id: 'dev-tuya' } as Link };
+
+    it('draws the switch off while only the backlight is on', async () => {
+      const view = await mountView({ hass: tuyaHass(), home: homeResponse({ links: TUYA }) });
+      expect(group(view, 'sw1').classList.contains('off')).toBe(true);
+      expect(group(view, 'sw1').classList.contains('on')).toBe(false);
+    });
+
+    it('lists only the gangs in the popup', async () => {
+      const view = await mountView({ hass: tuyaHass(), home: homeResponse({ links: TUYA }) });
+      tap(group(view, 'sw1'));
+      await settle(view);
+      const rows = [...root(view).querySelectorAll('.popup .row')];
+      expect(rows.map((r) => r.querySelector('.name')?.textContent)).toEqual(['Left', 'Right']);
+    });
+
+    it('opens a gang, not the child lock, on a hold', async () => {
+      const view = await mountView({ hass: tuyaHass(), home: homeResponse({ links: TUYA }) });
+      vi.useFakeTimers();
+      const seen: { entityId: string }[] = [];
+      view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+      pointer(group(view, 'sw1'), 'pointerdown');
+      vi.advanceTimersByTime(600);
+      pointer(group(view, 'sw1'), 'pointerup');
+      expect(seen).toEqual([{ entityId: 'switch.gang1' }]);
+    });
+  });
 });
 
 describe('link mode', () => {

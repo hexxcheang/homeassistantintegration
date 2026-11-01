@@ -121,4 +121,35 @@ describe('linkCandidates', () => {
       '|Porch cam',
     ]);
   });
+
+  describe('settings entities', () => {
+    const tuya = makeHass({
+      devices: { d_tuya: { name: 'Tuya switch' }, d_lockonly: { name: 'Only settings' } },
+      entities: {
+        'switch.gang1': { device_id: 'd_tuya' },
+        'switch.backlight': { device_id: 'd_tuya', entity_category: 'config' },
+        'lock.child_lock': { device_id: 'd_tuya', entity_category: 'config' },
+        'switch.hidden_relay': { hidden: true },
+        'light.indicator': { device_id: 'd_lockonly', entity_category: 'config' },
+        'lock.settings_lock': { device_id: 'd_lockonly', entity_category: 'diagnostic' },
+      },
+      states: {
+        'switch.gang1': { state: 'off' },
+        'switch.backlight': { state: 'on' },
+        'lock.child_lock': { state: 'unlocked' },
+        'switch.hidden_relay': { state: 'off' },
+        'light.indicator': { state: 'on' },
+        'lock.settings_lock': { state: 'locked' },
+      },
+    });
+
+    it('are not offered to lighting elements, nor are hidden entities', () => {
+      expect(ids(linkCandidates(element({ categoryId: 'downlights' }), tuya))).toEqual(['switch.gang1']);
+    });
+
+    it('do not make a device a candidate for a category', () => {
+      expect(ids(linkCandidates(element({ categoryId: 'smart-switches' }), tuya))).toEqual(['d_tuya']);
+      expect(ids(linkCandidates(element({ categoryId: 'smart-locks' }), tuya))).toEqual([]);
+    });
+  });
 });

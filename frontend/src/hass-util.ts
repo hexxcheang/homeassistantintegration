@@ -2,9 +2,17 @@ import type { HassEntity, HassLike, Link } from './types.ts';
 
 export const domainOf = (entityId: string): string => entityId.split('.', 1)[0] ?? '';
 
-/** The registry entries that belong to a device. */
+/**
+ * Whether an entity is one of the things a device is for. Config and diagnostic entities (a
+ * switch's backlight, its child lock, signal strength) and hidden ones are not.
+ */
+export function isPrimaryEntity(entity: HassEntity): boolean {
+  return !entity.entity_category && !entity.hidden;
+}
+
+/** The registry entries that make up a device, leaving out its settings and hidden entities. */
 export function deviceEntities(hass: HassLike, deviceId: string): HassEntity[] {
-  return Object.values(hass.entities).filter((e) => e.device_id === deviceId);
+  return Object.values(hass.entities).filter((e) => e.device_id === deviceId && isPrimaryEntity(e));
 }
 
 /**

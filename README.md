@@ -81,6 +81,10 @@ Do this on site, signed in to Home Assistant as an administrator.
 Unlinked elements are drawn greyed and do nothing when tapped. Elements whose device was deleted in
 Home Assistant show "Missing device": link them again.
 
+A linked device shows and switches only its main entities. Its settings, such as a wall switch's
+backlight or child lock, and entities hidden in Home Assistant are left out of the drawing, the
+tap and hold actions and the starter scenes.
+
 ## Android wall panels
 
 Use a non-admin user (checklist step 6), never an administrator.

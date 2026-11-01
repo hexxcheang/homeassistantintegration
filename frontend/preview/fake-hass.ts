@@ -159,6 +159,7 @@ function addEntity(
   state: string,
   attributes: Attributes,
   owner: { deviceId?: string; areaId?: string },
+  category: 'config' | 'diagnostic' | null = null,
 ): string {
   let id = wanted;
   for (let n = 2; world.states[id]; n++) id = `${wanted}_${n}`;
@@ -167,6 +168,7 @@ function addEntity(
     device_id: owner.deviceId ?? null,
     area_id: owner.deviceId ? null : (owner.areaId ?? null),
     name,
+    ...(category ? { entity_category: category } : {}),
   };
   world.states[id] = { state, attributes: { friendly_name: name, ...attributes } };
   return id;
@@ -203,12 +205,19 @@ function addDevice(world: World, el: HomeElement, areaId: string): Link {
   const base = slug(name);
   const add = (domain: string, suffix: string, label: string, state: string, attrs: Attributes = {}) =>
     addEntity(world, `${domain}.${base}${suffix}`, label, state, attrs, owner);
+  const addSetting = (domain: string, suffix: string, label: string, state: string) =>
+    addEntity(world, `${domain}.${base}${suffix}`, label, state, {}, owner, 'config');
 
   switch (el.categoryId) {
     case 'smart-switches':
     case 'control-panels': {
       const gangs = el.categoryId === 'smart-switches' ? gangCount(el) : 1;
       for (let i = 1; i <= gangs; i++) add('switch', `_${i}`, `${name} ${i}`, i === 1 ? 'on' : 'off');
+      if (el.categoryId === 'smart-switches') {
+        // Zigbee2MQTT's Tuya switches put their settings on the same device as config entities.
+        addSetting('switch', '_backlight', `${name} Backlight`, 'on');
+        addSetting('lock', '_child_lock', `${name} Child lock`, 'unlocked');
+      }
       break;
     }
     case 'curtains-blinds':
@@ -288,10 +297,17 @@ function addLightingGang(world: World, level: HomeLevel, areaId: string): Link {
 
 // ---- starter scenes ----
 
+/** A device brings its switchable entities, but not its settings (config or diagnostic) or hidden ones. */
 function resolveLink(link: Link, world: World): string[] {
   if (link.type === 'entity') return [link.id];
   return Object.values(world.entities)
-    .filter((e) => e.device_id === link.id && SCENE_DOMAINS.has(domainOf(e.entity_id)))
+    .filter(
+      (e) =>
+        e.device_id === link.id &&
+        !e.entity_category &&
+        !e.hidden &&
+        SCENE_DOMAINS.has(domainOf(e.entity_id)),
+    )
     .map((e) => e.entity_id);
 }
 

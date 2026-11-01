@@ -88,6 +88,21 @@ describe('createFakeHass: devices and entities', () => {
     expect(fake.states['binary_sensor.motion_sensor_motion']?.attributes['device_class']).toBe('motion');
   });
 
+  it('gives each smart switch a config Backlight switch and a config Child lock, as Zigbee2MQTT does', () => {
+    const fake = createFakeHass(fresh(), admin);
+    const device = Object.values(fake.devices).find((d) => d.name === 'Entrance switch')!;
+    const settings = Object.values(fake.entities).filter(
+      (e) => e.device_id === device.id && e.entity_category === 'config',
+    );
+    expect(settings.map((e) => [e.entity_id, fake.states[e.entity_id]?.state]).sort()).toEqual([
+      ['lock.entrance_switch_child_lock', 'unlocked'],
+      ['switch.entrance_switch_backlight', 'on'],
+    ]);
+    expect(fake.states['switch.entrance_switch_backlight']?.attributes['friendly_name']).toBe(
+      'Entrance switch Backlight',
+    );
+  });
+
   it('names areas after levels and puts devices in them', () => {
     const fake = createFakeHass(fresh(), admin);
     expect(Object.values(fake.areas).map((a) => a.name).sort()).toEqual(['Level 1', 'Level 2']);
@@ -602,8 +617,10 @@ describe('createFakeHass: starter scenes', () => {
       'All off',
       'All off – Level 1',
     ]);
-    // 3 switch gangs, the lighting circuit; the curtain and sensors are not switchable here
+    // 3 switch gangs, the lighting circuit; the curtain and sensors are not switchable here,
+    // and the switch's config backlight is a setting, not something "All off" turns off
     expect(byName['All off – Level 1']).toHaveLength(4);
+    expect(byName['All off']).not.toContain('switch.entrance_switch_backlight');
     expect(byName['All off']).toEqual(byName['All off – Level 1']);
     expect(byName['All lights off']).toHaveLength(1);
     expect(byName['All lights off']![0]).toMatch(/^switch\.level_1_lighting_1$/);

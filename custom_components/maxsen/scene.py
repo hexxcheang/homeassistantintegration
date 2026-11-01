@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from .store import MaxsenStore
 
 # A device link stands for the entities of the device that "off" makes sense for.
+# Its settings (config or diagnostic entities, e.g. a switch's backlight or child
+# lock), hidden and disabled entities never count.
 SWITCHABLE_DOMAINS = frozenset({"light", "switch", "fan", "climate"})
 
 type StarterScene = dict[str, Any]
@@ -35,8 +37,12 @@ def _resolve_link(
         return [link["id"]]
     return sorted(
         entity.entity_id
+        # Disabled entities are left out by async_entries_for_device itself.
         for entity in er.async_entries_for_device(registry, link["id"])
         if entity.domain in SWITCHABLE_DOMAINS
+        and entity.entity_category is None
+        and entity.hidden_by is None
+        and entity.disabled_by is None
     )
 
 

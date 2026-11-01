@@ -91,6 +91,26 @@ describe('visualState: lights and switches', () => {
     expect(visualState(element(), deviceLink('d1'), hass).status).toBe('off');
   });
 
+  it('follows the gangs only, not a config backlight or child lock on the same device', () => {
+    // A Zigbee2MQTT Tuya 2-gang switch: backlight is a config switch, child lock a config lock.
+    const hass = makeHass({
+      devices: { d1: {} },
+      entities: {
+        'switch.gang1': { device_id: 'd1' },
+        'switch.gang2': { device_id: 'd1' },
+        'switch.backlight': { device_id: 'd1', entity_category: 'config' },
+        'lock.child_lock': { device_id: 'd1', entity_category: 'config' },
+      },
+      states: {
+        'switch.gang1': { state: 'off' },
+        'switch.gang2': { state: 'off' },
+        'switch.backlight': { state: 'on' },
+        'lock.child_lock': { state: 'unlocked' },
+      },
+    });
+    expect(visualState(element(), deviceLink('d1'), hass)).toEqual({ status: 'off' });
+  });
+
   it('treats a fan like a light', () => {
     const hass = makeHass({ states: { 'fan.a': { state: 'on' } } });
     expect(visualState(element({ categoryId: 'ceiling-fans' }), entityLink('fan.a'), hass).status).toBe('on');

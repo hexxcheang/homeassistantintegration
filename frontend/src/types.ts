@@ -256,6 +256,10 @@ export interface HassEntity {
   device_id?: string | null;
   area_id?: string | null;
   name?: string | null;
+  /** `config` or `diagnostic` for a setting or a reading about the device itself; absent for its main entities. */
+  entity_category?: string | null;
+  /** Hidden by the user or the integration. */
+  hidden?: boolean;
 }
 
 export interface HassDevice {

@@ -10,6 +10,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.maxsen.const import DOMAIN
 from custom_components.maxsen.scene import MaxsenStarterScene, build_starter_scenes
+from homeassistant.const import EntityCategory
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
@@ -39,8 +40,12 @@ async def setup_entry(hass, package, *, installer_mode=True) -> MockConfigEntry:
     return entry
 
 
-def add_device(hass, name, entities, *, disabled=()):
-    """A device from another integration with one entity per (domain, object id)."""
+def add_device(hass, name, entities, *, disabled=(), config=(), diagnostic=(), hidden=()):
+    """A device from another integration with one entity per (domain, object id).
+
+    Object ids in ``config``/``diagnostic`` get that entity category; those in
+    ``hidden`` are hidden by the user.
+    """
     other = MockConfigEntry(domain="test", title=name)
     other.add_to_hass(hass)
     device = dr.async_get(hass).async_get_or_create(
@@ -56,6 +61,14 @@ def add_device(hass, name, entities, *, disabled=()):
             config_entry=other,
             device_id=device.id,
             disabled_by=er.RegistryEntryDisabler.USER if object_id in disabled else None,
+            hidden_by=er.RegistryEntryHider.USER if object_id in hidden else None,
+            entity_category=(
+                EntityCategory.CONFIG
+                if object_id in config
+                else EntityCategory.DIAGNOSTIC
+                if object_id in diagnostic
+                else None
+            ),
         )
     return device.id
 
@@ -151,6 +164,32 @@ def test_builder_only_takes_switchable_enabled_entities_of_a_device(hass, home_p
         "light.m_light",
         "switch.m_switch",
     ]
+
+
+def test_builder_leaves_out_settings_and_hidden_entities_of_a_device(hass, home_package):
+    """A Zigbee2MQTT Tuya 2-gang switch: backlight and child lock are config entities."""
+    device_id = add_device(
+        hass,
+        "tuya",
+        [
+            ("switch", "t_gang1"),
+            ("switch", "t_gang2"),
+            ("switch", "t_backlight"),
+            ("lock", "t_child_lock"),
+            ("light", "t_indicator"),
+            ("switch", "t_hidden"),
+        ],
+        config={"t_backlight", "t_child_lock"},
+        diagnostic={"t_indicator"},
+        hidden={"t_hidden"},
+    )
+    scenes = build_starter_scenes(
+        {"levels": home_package["levels"]},
+        {"sw1": {"type": "device", "id": device_id}},
+        hass,
+    )
+    assert scenes[0]["name"] == "All off"
+    assert scenes[0]["entity_ids"] == ["switch.t_gang1", "switch.t_gang2"]
 
 
 def test_builder_gives_a_lighting_only_home_no_empty_scene(hass, home_package):

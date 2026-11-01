@@ -1,4 +1,4 @@
-import { deviceEntities, domainOf } from './hass-util.ts';
+import { deviceEntities, domainOf, isPrimaryEntity } from './hass-util.ts';
 import type { CategoryId, HassLike, HomeElement, Link } from './types.ts';
 
 /** Lighting categories link to entities; every other category links to a device. */
@@ -56,6 +56,8 @@ function entityCandidates(domains: string[], hass: HassLike): Candidate[] {
   for (const id of ids) {
     if (!domains.includes(domainOf(id))) continue;
     const entry = hass.entities[id];
+    // A device's settings (backlight, child lock) and hidden entities are not lights.
+    if (entry && !isPrimaryEntity(entry)) continue;
     const friendly = hass.states[id]?.attributes['friendly_name'];
     const areaId = entry?.area_id ?? (entry?.device_id ? hass.devices[entry.device_id]?.area_id : null);
     out.push({

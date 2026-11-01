@@ -27,10 +27,14 @@ the floor plan should come from it, not be rebuilt by hand for every customer.
 
 ## Goals
 
-1. **Planner export:** an "Export to Home Assistant" action in the planner
-   produces one home package file per project.
-2. **Import:** the installer uploads that file into a Maxsen integration in
-   HA. Re-importing an updated export replaces the drawings and keeps existing
+1. **Connected to the planner:** staff press "Connect to Home Assistant" on
+   a project and get a pairing code. The installer types it into the Maxsen
+   integration in HA, which downloads the home from the planner. A downloadable
+   home package file is also available, as a fallback for homes without a
+   reliable connection.
+2. **Manual refresh** (decided by the user): when a plan changes after
+   install, nothing changes in the customer's HA until the installer taps
+   "Refresh from planner". A refresh replaces the drawings and keeps existing
    device links.
 3. **Floor plan card:** shows each level's drawing exactly as the planner draws
    it (same icons, colours, LED strips, curtain lines, labels), with live state:
@@ -54,9 +58,10 @@ the floor plan should come from it, not be rebuilt by hand for every customer.
 - 3D views; customers editing or rearranging the floor plan itself.
 - Showing scenes on the physical screen switches (a later idea, tied to the
   device-definition project).
-- The planner sending directly to a customer's HA over the network (file
-  export and upload only).
-- Managing many homes remotely; publishing to HACS.
+- Automatic syncing of planner changes (refresh is manual, by the installer).
+- Managing many homes remotely from one place.
+- Submitting to the default HACS store list (installed as a HACS custom
+  repository for now).
 - Device definitions for Maxsen hardware (separate project:
   `2026-11-01-maxsen-device-assistant-design.md`).
 
@@ -113,8 +118,40 @@ Chosen by the user: **B**.
   its `AGENTS.md` rules (own branch, PR, never push to `main`; `pnpm check`,
   `pnpm build`, `pnpm e2e` green; small PR).
 
+### Distribution (decided by the user)
+- The HA integration (with its card) is published from a **public GitHub
+  repo** and installed through **HACS as a custom repository**. Updates reach
+  every customer through HA's normal Updates screen. Releases are versioned
+  (GitHub releases), so HACS can offer them.
+- Because the code is public, it **contains no secrets**: no planner
+  credentials, API keys or customer data. The planner's address isn't secret,
+  and the installer enters it (or it's pre-filled) during setup.
+- **Check before publishing:** this repo also holds the device-definition kit,
+  whose `datapoints/raw/` would contain Maxsen's Tuya datapoint exports. If
+  those must stay private, they need to live elsewhere before the repo goes
+  public.
+
+### Planner connection *(security details are Claude's call)*
+- **Pairing:** "Connect to Home Assistant" on a project creates a short
+  pairing code that works once and expires (e.g. after 24 hours) if unused.
+  When HA uses the code, the planner swaps it for a long-lived access token
+  that HA stores in its integration config.
+- **What the token can do:** read **that one project's** floor-plan package,
+  nothing else. No prices, invoices, leads, customer details, inbox or Jiaxin.
+- Staff can see and **revoke** a project's Home Assistant connection in the
+  planner.
+- New planner endpoints are rate-limited, and pairing attempts are limited to
+  stop code guessing.
+- Planner work goes in through PRs per its `AGENTS.md`: own branch, checks
+  green, never pushed to `main`. It touches a live app with real customers,
+  so changes are kept small and separate from Jiaxin.
+- **Refresh:** "Refresh from planner" (installer mode only) downloads the
+  current package with the stored token, shows a summary (devices added,
+  removed, drawings changed), and applies it on confirm.
+
 ### Home package *(format is Claude's call)*
-One `.zip` file per project:
+The same content whether downloaded through the connection or as a file. One
+`.zip` per project:
 - `manifest.json`: package schema version, planner project id, project
   title, export time, planner revision per plan.
 - Per level: id, name, sort order; per plan: type (`smart-home`/`lighting`),
@@ -138,11 +175,12 @@ One `.zip` file per project:
 - Element labels are kept (e.g. "Living L1"), because they're how the
   installer and customer recognise devices.
 
-### Import and re-import
-- The integration's setup flow accepts the zip. The package and images are
-  stored in HA's config storage and served to the card.
-- Re-import replaces drawings and keeps links for element ids that still
-  exist, then reports devices that were added (need linking) and removed
+### Import and refresh
+- The integration's setup flow takes either a pairing code (and planner
+  address) or an uploaded zip. The package and images are stored in HA's
+  config storage and served to the card.
+- Refresh and re-upload replace drawings and keep links for element ids that
+  still exist, then report devices that were added (need linking) and removed
   (links dropped).
 
 ### Linking model
@@ -198,5 +236,7 @@ customers can remove them.
 - Exact visuals for each state, the zoom/pan implementation, popup design.
 - Exact zip schema beyond the fields listed, and how the planner gathers the
   scenes and images (reusing existing export code where possible).
-- Where the export button sits in the planner UI.
+- Where "Connect to Home Assistant" and the file download sit in the planner
+  UI, and how the planner stores connection tokens.
+- Exact token format, expiry and rate-limit numbers within the rules above.
 - Test strategy on both sides, within each repo's existing conventions.

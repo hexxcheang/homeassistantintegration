@@ -334,6 +334,75 @@ describe('createFakeHass: opening another home', () => {
   });
 });
 
+describe('createFakeHass: opening a home that is not clean', () => {
+  const lighting = (pkg: HomePackage) => pkg.levels[0]!.plans.find((p) => p.type === 'smart-home')!;
+
+  it('falls back to the element id for a name when it has no label or product name', async () => {
+    const pkg = fresh();
+    const el = lighting(pkg).elements.find((e) => e.id === 'cur1')!;
+    el.label = undefined as never;
+    el.productName = undefined as never;
+    const fake = createFakeHass(fresh(), admin);
+    fake.openHome(pkg);
+    expect(fake.states['cover.cur1']?.attributes['friendly_name']).toBe('cur1');
+    expect((await getHome(fake)).links).toHaveProperty('cur1');
+  });
+
+  it('uses a numeric label as text', () => {
+    const pkg = fresh();
+    lighting(pkg).elements.find((e) => e.id === 'cur1')!.label = 42 as never;
+    const fake = createFakeHass(pkg, admin);
+    expect(fake.states['cover.42']?.attributes['friendly_name']).toBe('42');
+  });
+
+  it('leaves the previous home fully intact when opening throws', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    await ws(fake, { type: 'maxsen/quick_panel/set', items: [{ type: 'element', id: 'sw1' }] });
+    await ws(fake, { type: 'maxsen/scenes/create_starter' });
+    const before = await getHome(fake);
+    const registries = [fake.states, fake.entities, fake.devices, fake.areas];
+    const listener = vi.fn();
+    const events: string[] = [];
+    fake.onChange(listener);
+    await fake.connection.subscribeMessage<{ event: string }>((m) => events.push(m.event), {
+      type: 'maxsen/subscribe',
+      entry_id: ENTRY,
+    });
+    const broken = fresh();
+    Object.defineProperty(broken, 'levels', {
+      get() {
+        throw new TypeError('boom');
+      },
+    });
+    expect(() => fake.openHome(broken)).toThrow('boom');
+
+    expect(await getHome(fake)).toEqual(before);
+    expect([fake.states, fake.entities, fake.devices, fake.areas]).toEqual(registries);
+    expect(listener).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+    // still works as the old home: the starter scene turns its members off, refresh sees the old home
+    await fake.callService('scene', 'turn_on', { entity_id: 'scene.all_off' });
+    expect(fake.states['switch.entrance_switch_1']!.state).toBe('off');
+    const summary = await ws<RefreshSummary>(fake, { type: 'maxsen/refresh/preview' });
+    expect(summary.added).toEqual([]);
+  });
+
+  it('leaves the previous home intact when provisioning throws part-way', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const before = await getHome(fake);
+    const broken = fresh();
+    const plan = broken.levels[1]!.plans[0]!;
+    Object.defineProperty(plan, 'elements', {
+      get() {
+        throw new TypeError('late boom');
+      },
+    });
+    expect(() => fake.openHome(broken)).toThrow('late boom');
+    expect(await getHome(fake)).toEqual(before);
+    expect(fake.states['switch.entrance_switch_1']).toBeDefined();
+  });
+});
+
 describe('createFakeHass: refresh', () => {
   it('previews an empty summary when the planner still has the loaded home', async () => {
     const fake = createFakeHass(fresh(), admin);
@@ -528,6 +597,15 @@ describe('parseHomeFile', () => {
     const missing = fresh();
     missing.levels[0]!.plans[0]!.background.imageId = 'gone';
     expect(reason(text(missing))).toBe('missing_image');
+    // the names the preview builds devices from must be text
+    for (const field of ['label', 'productName', 'variantName', 'categoryId'] as const) {
+      const broken = fresh();
+      (broken.levels[0]!.plans[0]!.elements[0] as unknown as Record<string, unknown>)[field] = 42;
+      expect(reason(text(broken)), field).toBe('wrong_format');
+      const absent = fresh();
+      delete (absent.levels[0]!.plans[0]!.elements[0] as unknown as Record<string, unknown>)[field];
+      expect(reason(text(absent)), `no ${field}`).toBe('wrong_format');
+    }
   });
 
   it('has a friendly message for every reason', () => {

@@ -99,7 +99,16 @@ async function readHomeFile(input: HTMLInputElement): Promise<HomePackage | unde
 homeFile.addEventListener('change', async () => {
   const pkg = await readHomeFile(homeFile);
   if (!pkg) return;
-  fake.openHome(pkg);
+  try {
+    fake.openHome(pkg);
+  } catch (error) {
+    console.error(error);
+    say(
+      `That file passed the checks but the preview could not build a home from it, so the previous home is still shown. (${error instanceof Error ? error.message : String(error)})`,
+      true,
+    );
+    return;
+  }
   sayLoaded(pkg.project.title, 'from your file');
 });
 

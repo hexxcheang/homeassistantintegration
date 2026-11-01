@@ -87,7 +87,13 @@ export function parseHomeFile(raw: string, byteLength: number = raw.length): Hom
       const background = plan['background'];
       check(isRecord(background) && isString(background['imageId']));
       if (!(background['imageId'] in images)) throw new PackageProblem('missing_image');
-      for (const element of plan['elements']) check(isRecord(element) && isString(element['id']));
+      for (const element of plan['elements']) {
+        check(isRecord(element) && isString(element['id']));
+        // The names the preview builds its fake devices from.
+        for (const field of ['categoryId', 'productName', 'variantName', 'label']) {
+          check(isString(element[field]));
+        }
+      }
     }
   }
   return pkg as unknown as HomePackage;

@@ -187,7 +187,7 @@ function gangCount(el: HomeElement): number {
 
 /** One fake device for a non-lighting element, with the entities its category would have. */
 function addDevice(world: World, el: HomeElement, areaId: string): Link {
-  const name = uniqueDeviceName(world, el.label || el.productName);
+  const name = uniqueDeviceName(world, String(el.label || el.productName || el.id));
   const deviceId = `device_${el.id}`;
   world.devices[deviceId] = { id: deviceId, name, area_id: areaId };
   const owner = { deviceId, areaId };
@@ -643,16 +643,19 @@ export function createFakeHass(
       for (const listener of [...listeners]) listener();
     },
     openHome(next) {
+      // Build everything first: if anything throws, the previous home is left exactly as it was.
+      const nextStored = strip(next);
+      const world: World = { states: {}, entities: {}, devices: {}, areas: {} };
+      const nextLinks = provision(world, next, () => true);
       pkg = next;
-      stored = strip(pkg);
+      stored = nextStored;
       plannerPackage = next;
+      links = nextLinks;
       quickPanel = [];
       scenes = [];
       sceneEntities = new Map();
       files.clear();
       previews.clear();
-      const world: World = { states: {}, entities: {}, devices: {}, areas: {} };
-      links = provision(world, pkg, () => true);
       commit(world);
       emit('home');
     },

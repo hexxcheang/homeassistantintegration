@@ -8,6 +8,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.maxsen.const import CONF_INSTALLER_MODE, DOMAIN
+from custom_components.maxsen.scene import async_create_starter_scenes
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 
@@ -381,3 +382,151 @@ async def test_options_flow_toggles_installer_mode(hass, home_package):
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options == {CONF_INSTALLER_MODE: False}
+
+
+# ---------------------------------------------------------------- reconfigure
+
+
+async def set_up_home(hass, home_package, data) -> MockConfigEntry:
+    """A loaded home with a link, a quick panel and starter scenes."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="proj-test-house",
+        title="Test House",
+        data={"project_id": "proj-test-house", "title": "Test House", **data},
+        options={CONF_INSTALLER_MODE: True},
+    )
+    entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {}).setdefault("pending", {})[
+        "proj-test-house"
+    ] = home_package
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    store = entry.runtime_data
+    await store.async_set_links({"dl1": {"type": "entity", "id": "light.porch"}})
+    await store.async_set_quick_panel([{"type": "element", "id": "dl1"}])
+    await async_create_starter_scenes(hass, entry)
+    return entry
+
+
+PLANNER_DATA = {"source": "planner", "planner_url": BASE, "token": "old-token"}
+NEW_BASE = "https://new-planner.example.com"
+NEW_PAIR_URL = f"{NEW_BASE}/api/public/home-assistant/pair"
+
+
+async def test_reconfigure_form_is_prefilled_with_the_planner_address(
+    hass, home_package
+):
+    entry = await set_up_home(hass, home_package, PLANNER_DATA)
+
+    result = await entry.start_reconfigure_flow(hass)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    defaults = {
+        str(key): key.default() for key in result["data_schema"].schema
+    }
+    assert defaults == {"planner_url": BASE, "code": ""}
+
+
+async def test_reconfigure_pairs_again_and_keeps_everything(
+    hass, aioclient_mock, home_package
+):
+    entry = await set_up_home(hass, home_package, PLANNER_DATA)
+    before = {
+        key: entry.runtime_data.data[key] for key in ("links", "quick_panel", "scenes")
+    }
+    assert before["scenes"]
+    aioclient_mock.post(NEW_PAIR_URL, json={**PAIRED, "token": "new-token"})
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"planner_url": NEW_BASE + "/", "code": " NEW123 "}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert aioclient_mock.mock_calls[0][2] == {
+        "code": "NEW123",
+        "deviceName": hass.config.location_name,
+    }
+    assert entry.data == {
+        "source": "planner",
+        "planner_url": NEW_BASE,
+        "token": "new-token",
+        "project_id": "proj-test-house",
+        "title": "Test House",
+    }
+    # The entry was reloaded from what it had stored: nothing was lost.
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    after = {
+        key: entry.runtime_data.data[key] for key in ("links", "quick_panel", "scenes")
+    }
+    assert after == before
+    assert entry.runtime_data.data["package"]["project"]["id"] == "proj-test-house"
+    assert hass.states.get("scene.all_off") is not None
+
+
+async def test_reconfigure_turns_a_file_home_into_a_planner_home(
+    hass, aioclient_mock, home_package
+):
+    entry = await set_up_home(hass, home_package, {"source": "file"})
+    aioclient_mock.post(PAIR_URL, json=PAIRED)
+
+    result = await entry.start_reconfigure_flow(hass)
+    defaults = {str(key): key.default() for key in result["data_schema"].schema}
+    assert defaults["planner_url"] == "https://"
+    result = await submit_pair(hass, result["flow_id"])
+    await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data["source"] == "planner"
+    assert entry.data["planner_url"] == BASE
+    assert entry.data["token"] == "secret-token"
+    assert entry.runtime_data.data["links"] == {
+        "dl1": {"type": "entity", "id": "light.porch"}
+    }
+
+
+async def test_reconfigure_with_a_code_for_another_project_aborts(
+    hass, aioclient_mock, home_package
+):
+    entry = await set_up_home(hass, home_package, PLANNER_DATA)
+    aioclient_mock.post(PAIR_URL, json={**PAIRED, "projectId": "proj-other"})
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await submit_pair(hass, result["flow_id"])
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "wrong_project"
+    assert entry.data["token"] == "old-token"
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [(401, "bad_code"), (400, "bad_code"), (429, "too_many"), (500, "cannot_connect")],
+)
+async def test_reconfigure_errors_show_on_the_form(
+    hass, aioclient_mock, home_package, status, error
+):
+    entry = await set_up_home(hass, home_package, PLANNER_DATA)
+    aioclient_mock.post(PAIR_URL, status=status, json={"error": "x"})
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await submit_pair(hass, result["flow_id"], code="WRONG")
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": error}
+    assert entry.data["token"] == "old-token"
+
+
+async def test_reconfigure_rejects_a_bad_address(hass, aioclient_mock, home_package):
+    entry = await set_up_home(hass, home_package, PLANNER_DATA)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await submit_pair(hass, result["flow_id"], url="http://planner.example.com")
+
+    assert result["errors"] == {"planner_url": "invalid_url"}
+    assert aioclient_mock.call_count == 0

@@ -554,6 +554,21 @@ describe('createFakeHass: where the home came from', () => {
     expect((await getHome(fake)).source).toBe('file');
   });
 
+  it('answers a revoked connection as the integration does, and still takes a home file', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    fake.revokePairing();
+    await expect(ws(fake, { type: 'maxsen/refresh/preview' })).rejects.toMatchObject({
+      code: 'revoked',
+      message:
+        'Connection revoked: ask Maxsen for a new pairing code, then use Reconfigure on the Maxsen Home integration.',
+    });
+    const fileId = fake.uploadFile(fresh());
+    await expect(ws(fake, { type: 'maxsen/refresh/preview', file_id: fileId })).resolves.toMatchObject({
+      added: [],
+      removed: [],
+    });
+  });
+
   it('needs a file to refresh from once the home came from a file', async () => {
     const fake = createFakeHass(fresh(), admin);
     fake.openHome(fresh());

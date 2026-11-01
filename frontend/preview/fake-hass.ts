@@ -43,6 +43,8 @@ export interface FakeHass extends HassLike {
   openHome(pkg: HomePackage): void;
   /** What the pretend planner answers to "Refresh from planner". Starts as the loaded home. */
   setPlannerPackage(pkg: HomePackage): void;
+  /** The planner disconnects this home: refreshing from the planner answers `revoked` until a new home is opened. */
+  revokePairing(): void;
   /** Keep a file for `maxsen/refresh/preview` with `file_id`. Returns the id. */
   uploadFile(pkg: HomePackage): string;
   /** Flip the door sensors every 20 s so alerts can be seen. Returns the stop function. */
@@ -352,6 +354,7 @@ export function createFakeHass(
   /** Where the home came from: the sample home plays a planner project; an opened file is a file. */
   let source: HomeResponse['source'] = 'planner';
   let plannerPackage = initial;
+  let revoked = false;
   /** What `/api/file_upload` kept: uploaded text, checked when previewed as the integration does. */
   const files = new Map<string, HomePackage | string>();
   const previews = new Map<string, Preview>();
@@ -568,6 +571,12 @@ export function createFakeHass(
       if (file === undefined) throw new CommandError('invalid_package', 'That file is no longer available');
       next = typeof file === 'string' ? readUploaded(file) : file;
     } else if (source === 'planner') {
+      if (revoked) {
+        throw new CommandError(
+          'revoked',
+          'Connection revoked: ask Maxsen for a new pairing code, then use Reconfigure on the Maxsen Home integration.',
+        );
+      }
       next = plannerPackage;
     } else {
       throw new CommandError('invalid_package', 'Choose the file to refresh from');
@@ -719,6 +728,7 @@ export function createFakeHass(
       stored = nextStored;
       source = 'file';
       plannerPackage = next;
+      revoked = false;
       links = nextLinks;
       quickPanel = [];
       scenes = [];
@@ -730,6 +740,9 @@ export function createFakeHass(
     },
     setPlannerPackage(next) {
       plannerPackage = next;
+    },
+    revokePairing() {
+      revoked = true;
     },
     uploadFile(file) {
       const id = `file-${++counter}`;

@@ -193,12 +193,18 @@ async def test_preview_changes_nothing(
         (
             {"status": 401, "json": {"error": "revoked"}},
             "revoked",
-            "Connection revoked: ask Maxsen for a new pairing code",
+            (
+                "Connection revoked: ask Maxsen for a new pairing code, then use "
+                "Reconfigure on the Maxsen Home integration."
+            ),
         ),
         (
             {"status": 401, "json": {"error": "unknown"}},
             "revoked",
-            "Connection revoked: ask Maxsen for a new pairing code",
+            (
+                "Connection revoked: ask Maxsen for a new pairing code, then use "
+                "Reconfigure on the Maxsen Home integration."
+            ),
         ),
         (
             {"status": 429, "json": {"error": "too-many"}},

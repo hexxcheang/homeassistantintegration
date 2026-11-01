@@ -7,7 +7,10 @@ import { homeResponse, root, settle } from './view-helpers.ts';
 
 const GANG2: Link = { type: 'entity', id: 'switch.l1_gang2' };
 const HALL: Link = { type: 'device', id: 'dev-hall' };
-const REVOKED = { code: 'revoked', message: 'Connection revoked: ask Maxsen for a new pairing code' };
+const REVOKED = {
+  code: 'revoked',
+  message: 'Connection revoked: ask Maxsen for a new pairing code, then use Reconfigure on the Maxsen Home integration.',
+};
 
 function makeWorld() {
   return makeHass({
@@ -93,13 +96,14 @@ afterEach(() => {
 });
 
 describe('toolbar', () => {
-  it('has Done, Select several, Create starter scenes and Refresh from planner', async () => {
+  it('has Done, Select several, Create starter scenes, Refresh from planner and a home file option', async () => {
     const { el } = await mount();
     expect(text(q(el, '.done'))).toBe('Done');
     expect(text(q(el, '.multi'))).toBe('Select several');
     expect(text(q(el, '.starter'))).toBe('Create starter scenes');
     expect(text(q(el, '.refresh'))).toBe('Refresh from planner');
-    expect(root(el).querySelector('.choose-file')).toBeNull();
+    // A paired home can still be refreshed from a file, e.g. while the connection is revoked.
+    expect(text(q(el, '.choose-file'))).toBe('Use a home file instead');
   });
 
   it('tells the panel when the installer is Done', async () => {
@@ -526,7 +530,7 @@ describe('refresh from the planner', () => {
     click(q(el, '.refresh'));
     await settle(el);
 
-    expect(text(q(el, '.dialog .error'))).toBe('Connection revoked: ask Maxsen for a new pairing code');
+    expect(text(q(el, '.dialog .error'))).toBe(REVOKED.message);
     expect(root(el).querySelector('.apply')).toBeNull();
     expect(root(el).querySelector('.dialog .summary')).toBeNull();
     expect(text(q(el, '.dialog .cancel'))).toBe('Close');
@@ -562,14 +566,47 @@ describe('refresh from the planner', () => {
   });
 });
 
+function chooseFile(el: MaxsenLinkMode, file: File): void {
+  const input = q<HTMLInputElement>(el, 'input[type="file"]');
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  input.dispatchEvent(new Event('change'));
+}
+
+describe('a home paired with the planner, refreshed from a file', () => {
+  it('uploads the file and previews it by its id, saying it reads the file', async () => {
+    let answer!: (value: RefreshSummary) => void;
+    const { el, hass, callWS } = await mount(
+      homeResponse({ installer_mode: true }),
+      () => new Promise<RefreshSummary>((resolve) => (answer = resolve)),
+    );
+    vi.spyOn(hass, 'fetchWithAuth').mockResolvedValue(
+      new Response(JSON.stringify({ file_id: 'abc123' }), { status: 200 }),
+    );
+
+    chooseFile(el, new File(['{}'], 'house home.json', { type: 'application/json' }));
+    await settle(el);
+
+    expect(text(q(el, '.dialog .working'))).toBe('Reading the file…');
+    expect(callWS).toHaveBeenCalledWith({
+      type: 'maxsen/refresh/preview',
+      entry_id: 'e1',
+      file_id: 'abc123',
+    });
+    answer(summary());
+    await settle(el);
+    expect(text(q(el, '.dialog .summary'))).toContain('2 new devices to link');
+  });
+
+  it('still says it checks the planner for Refresh from planner', async () => {
+    const { el } = await mount(homeResponse({ installer_mode: true }), () => new Promise(() => undefined));
+    click(q(el, '.refresh'));
+    await settle(el);
+    expect(text(q(el, '.dialog .working'))).toBe('Checking the planner…');
+  });
+});
+
 describe('a home loaded from a file', () => {
   const fileHome = () => homeResponse({ installer_mode: true, source: 'file' });
-
-  function chooseFile(el: MaxsenLinkMode, file: File): void {
-    const input = q<HTMLInputElement>(el, 'input[type="file"]');
-    Object.defineProperty(input, 'files', { value: [file], configurable: true });
-    input.dispatchEvent(new Event('change'));
-  }
 
   it('offers to choose a newer file instead of the planner', async () => {
     const { el } = await mount(fileHome());

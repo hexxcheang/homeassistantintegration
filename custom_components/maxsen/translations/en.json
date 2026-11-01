@@ -27,6 +27,18 @@
         "data": {
           "file": "Home file"
         }
+      },
+      "reconfigure": {
+        "title": "Pair with the Maxsen Planner again",
+        "description": "For a disconnected home, a new planner address, or a home added from a file. In the planner, open this home's project and create a pairing code for Home Assistant. The drawing, links, quick panel and scenes stay as they are.",
+        "data": {
+          "planner_url": "Planner address",
+          "code": "Pairing code"
+        },
+        "data_description": {
+          "planner_url": "The web address of your Maxsen Planner, starting with https://",
+          "code": "The code shown in the planner. It works once."
+        }
       }
     },
     "error": {
@@ -40,7 +52,9 @@
       "too_large": "This file is larger than 100 MB."
     },
     "abort": {
-      "already_configured": "This home is already added."
+      "already_configured": "This home is already added.",
+      "wrong_project": "That pairing code is for a different project. Create the code in this home's project in the planner.",
+      "reconfigure_successful": "Paired again. Refresh from planner works for this home now."
     }
   },
   "options": {

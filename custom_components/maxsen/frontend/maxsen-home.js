@@ -2495,7 +2495,10 @@ var an = class extends K {
 	async _preview(e, t = ++this._dialogRun) {
 		let { hass: n, entryId: r } = this;
 		if (n && r) {
-			this._openDialog({ phase: "checking" });
+			this._openDialog({
+				phase: "checking",
+				fromFile: e !== void 0
+			});
 			try {
 				let i = await be(n, r, e);
 				t === this._dialogRun && (this._dialog = {
@@ -2516,7 +2519,10 @@ var an = class extends K {
 		let { hass: r } = this;
 		if (!n || !r) return;
 		let i = ++this._dialogRun;
-		this._openDialog({ phase: "checking" });
+		this._openDialog({
+			phase: "checking",
+			fromFile: !0
+		});
 		let a;
 		try {
 			a = await we(r, n);
@@ -2662,7 +2668,7 @@ var an = class extends K {
       <div class="backdrop"></div>
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="refresh-title">
         <h3 id="refresh-title">Refresh the home</h3>
-        ${e.phase === "checking" ? I`<p class="working">${this.home?.source === "file" ? "Reading the file…" : "Checking the planner…"}</p>` : z}
+        ${e.phase === "checking" ? I`<p class="working">${e.fromFile ? "Reading the file…" : "Checking the planner…"}</p>` : z}
         ${t ? I`<p class="summary">${rn(t)}</p>
               ${r ? I`${this._renderChanges("New devices", t.added.map(n))}
                   ${this._renderChanges("Removed devices", t.removed.map(n))}
@@ -2695,15 +2701,11 @@ var an = class extends K {
         <button class="starter" ?disabled=${this._busy} @click=${() => void this._createStarterScenes()}>
           Create starter scenes
         </button>
-        ${e ? I`<button class="choose-file" @click=${() => this.renderRoot.querySelector("input[type=\"file\"]")?.click()}>
-                Choose a newer home file
-              </button>
-              <input
-                type="file"
-                accept=".json,application/json"
-                hidden
-                @change=${(e) => void this._chooseFile(e)}
-              />` : I`<button class="refresh" @click=${() => void this._preview()}>Refresh from planner</button>`}
+        ${e ? z : I`<button class="refresh" @click=${() => void this._preview()}>Refresh from planner</button>`}
+        <button class="choose-file" @click=${() => this.renderRoot.querySelector("input[type=\"file\"]")?.click()}>
+          ${e ? "Choose a newer home file" : "Use a home file instead"}
+        </button>
+        <input type="file" accept=".json,application/json" hidden @change=${(e) => void this._chooseFile(e)} />
       </div>
       ${this._notice ? I`<p class=${q({
 			notice: !0,

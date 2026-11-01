@@ -206,6 +206,63 @@ class MaxsenConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pair a home that is already added with the planner again, with a new code.
+
+        For a revoked connection, a new planner address, or a home that came from
+        a file. Only the connection changes: the drawing, links, quick panel and
+        scenes stay as they are, and the entry is reloaded from what it stored.
+        """
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            planner_url = normalise_planner_url(user_input[CONF_PLANNER_URL])
+            if planner_url is None:
+                errors[CONF_PLANNER_URL] = "invalid_url"
+            else:
+                client = PlannerClient(async_get_clientsession(self.hass), planner_url)
+                try:
+                    paired = await client.pair(
+                        user_input[CONF_CODE].strip(),
+                        self.hass.config.location_name or "Home Assistant",
+                    )
+                except PlannerBadCode:
+                    errors["base"] = "bad_code"
+                except PlannerTooMany:
+                    errors["base"] = "too_many"
+                except PlannerError:
+                    errors["base"] = "cannot_connect"
+                else:
+                    if paired["projectId"] != entry.unique_id:
+                        return self.async_abort(reason="wrong_project")
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        data_updates={
+                            CONF_SOURCE: SOURCE_PLANNER,
+                            CONF_PLANNER_URL: planner_url,
+                            CONF_TOKEN: paired["token"],
+                        },
+                    )
+
+        defaults = user_input or {}
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_PLANNER_URL,
+                        default=defaults.get(
+                            CONF_PLANNER_URL, entry.data.get(CONF_PLANNER_URL, "https://")
+                        ),
+                    ): str,
+                    vol.Required(CONF_CODE, default=defaults.get(CONF_CODE, "")): str,
+                }
+            ),
+            errors=errors,
+        )
+
     def _create(self, package: dict, data: dict[str, Any]) -> ConfigFlowResult:
         """Hand the validated package to entry setup and create the entry.
 

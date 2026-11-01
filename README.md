@@ -46,7 +46,7 @@ work; use a home file instead.
 3. The **Home** item appears in the sidebar. The drawing is there, but nothing is linked yet.
 
 One project can be added once. A home set up from a file is updated by uploading a newer file (see
-*Updating the home*).
+*Updating the home*), or can be paired with the planner later (see *Pairing again*).
 
 To put the drawing on a dashboard as well: **Edit dashboard**, **Add card**, **Maxsen floor plan**.
 In YAML it is `type: custom:maxsen-floorplan-card`.
@@ -114,21 +114,31 @@ then in Home Assistant (installer mode on, signed in as administrator):
 
 It only refreshes when you ask; Home Assistant never checks the planner by itself. For a home set
 up from a file the button is **Choose a newer home file**: download the new file from the planner
-and pick it. The file must be from the same project.
+and pick it. A home paired with the planner also has **Use a home file instead**, for when the
+planner cannot be reached or the connection was revoked. The file must be from the same project.
 
 ## Disconnecting
 
 In the planner, open the project's **Home Assistant** dialog and tap **Disconnect** next to the
 connection (staff do this). The next time an installer taps **Refresh from planner**, Home Assistant
-shows "Connection revoked: ask Maxsen for a new pairing code". The drawing, links, quick panel
-and scenes keep working as they are; only refreshing stops.
+shows "Connection revoked: ask Maxsen for a new pairing code, then use Reconfigure on the Maxsen
+Home integration." The drawing, links, quick panel and scenes keep working as they are; only
+refreshing from the planner stops (**Use a home file instead** still works).
 
-To connect again you need a new pairing code (the old one was used up), or the home file. The
-integration cannot yet take a new code for a home it already has, so remove **Maxsen Home** in
-**Settings**, **Devices & services** and add it again. Removing it clears everything kept for that
-home: the links, the quick panel and the starter scenes. After adding it again, go through the
-installer checklist: switch **Installer mode** on, link the devices (step 3), tap **Create starter
-scenes** (step 4), set up the quick panel (step 5), and switch **Installer mode** off again.
+## Pairing again
+
+Use this to connect a disconnected home again, to change the planner address, or to pair a home
+that was added from a file. Nothing is lost: the drawing, links, quick panel and starter scenes
+stay as they are.
+
+1. In the planner, open this home's project, tap **Home Assistant**, then **Create pairing code**.
+2. In Home Assistant go to **Settings**, **Devices & services**, **Maxsen Home**. Open the menu
+   (three dots) next to the home and tap **Reconfigure**.
+3. Check the **Planner address** and enter the **Pairing code**, then **Submit**. "Paired again.
+   Refresh from planner works for this home now." means it worked.
+
+The code must be created in the same project as the home; otherwise Home Assistant says "That
+pairing code is for a different project." and nothing changes.
 
 ## Troubleshooting
 
@@ -144,8 +154,9 @@ What the integration says, and what to do:
 | This is not a Maxsen home file. | Use the file from the planner's **Download home file**, not another `.json`. |
 | This home file is from a newer planner. Update this integration. | In HACS update **Maxsen Home**, restart Home Assistant. |
 | This file is larger than 100 MB. | Ask Maxsen. |
-| This home is already added. | That project is already in Home Assistant. Open **Home**. |
-| Connection revoked: ask Maxsen for a new pairing code | See *Disconnecting*. |
+| This home is already added. | That project is already in Home Assistant. Open **Home**. To connect it again, see *Pairing again*. |
+| That pairing code is for a different project. Create the code in this home's project in the planner. | Create a new code in the project of this home (the used code no longer works), then **Reconfigure** again. |
+| Connection revoked: ask Maxsen for a new pairing code, then use Reconfigure on the Maxsen Home integration. | See *Pairing again*. |
 | The planner is busy. Try again in 15 minutes. | Wait, then **Refresh from planner** again. |
 | Can't reach the planner | Check the internet connection. The home keeps working meanwhile. |
 | Refreshing needs an administrator and installer mode | Sign in as an administrator and switch **Installer mode** on. |
@@ -240,7 +251,8 @@ Below the toolbar is the actual Maxsen Home panel.
   and "All lights off", and puts them on the quick panel. **Done** goes back.
 - **Refresh from planner** (in link mode) shows what would change ("2 new devices to link, 1 device
   removed, 1 drawing updated", with the lists) and only changes the home when you tap **Apply**.
-  For a home opened from a file, **Choose a newer home file** does the same with a file you pick.
+  **Use a home file instead** does the same with a file you pick, and for a home opened from a
+  file the button is **Choose a newer home file**.
 
 Whatever you change (links, the quick panel, scenes) is kept until you reload the page.
 

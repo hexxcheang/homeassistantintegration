@@ -204,7 +204,10 @@ def _send_planner_error(
 ) -> None:
     """Report a failed download in the words the panel shows."""
     if isinstance(err, PlannerRevoked):
-        code, message = "revoked", "Connection revoked: ask Maxsen for a new pairing code"
+        code, message = "revoked", (
+            "Connection revoked: ask Maxsen for a new pairing code, then use "
+            "Reconfigure on the Maxsen Home integration."
+        )
     elif isinstance(err, PlannerTooMany):
         code, message = "too_many", "The planner is busy. Try again in 15 minutes."
     elif isinstance(err, PlannerNotReady):

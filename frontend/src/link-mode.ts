@@ -22,6 +22,8 @@ interface Notice {
 
 interface Dialog {
   phase: 'checking' | 'ready' | 'applying' | 'error';
+  /** The home is read from a file the installer chose, not fetched from the planner. */
+  fromFile?: boolean;
   summary?: RefreshSummary;
   error?: string;
 }
@@ -200,7 +202,7 @@ export class MaxsenLinkMode extends LitElement {
   private async _preview(fileId?: string, run = ++this._dialogRun): Promise<void> {
     const { hass, entryId } = this;
     if (!hass || !entryId) return;
-    this._openDialog({ phase: 'checking' });
+    this._openDialog({ phase: 'checking', fromFile: fileId !== undefined });
     try {
       const summary = await refreshPreview(hass, entryId, fileId);
       if (run === this._dialogRun) this._dialog = { phase: 'ready', summary };
@@ -218,7 +220,7 @@ export class MaxsenLinkMode extends LitElement {
     const { hass } = this;
     if (!file || !hass) return;
     const run = ++this._dialogRun;
-    this._openDialog({ phase: 'checking' });
+    this._openDialog({ phase: 'checking', fromFile: true });
     let fileId: string;
     try {
       fileId = await uploadHomeFile(hass, file);
@@ -381,7 +383,7 @@ export class MaxsenLinkMode extends LitElement {
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="refresh-title">
         <h3 id="refresh-title">Refresh the home</h3>
         ${dialog.phase === 'checking'
-          ? html`<p class="working">${this.home?.source === 'file' ? 'Reading the file…' : 'Checking the planner…'}</p>`
+          ? html`<p class="working">${dialog.fromFile ? 'Reading the file…' : 'Checking the planner…'}</p>`
           : nothing}
         ${summary
           ? html`<p class="summary">${summaryLine(summary)}</p>
@@ -415,6 +417,8 @@ export class MaxsenLinkMode extends LitElement {
   }
 
   override render(): TemplateResult {
+    // A home from a file is refreshed from a newer file. A paired home is refreshed from the
+    // planner, or from a file when the planner cannot be used (no internet, connection revoked).
     const fromFile = this.home?.source === 'file';
     return html`
       <div class="toolbar">
@@ -426,16 +430,12 @@ export class MaxsenLinkMode extends LitElement {
           Create starter scenes
         </button>
         ${fromFile
-          ? html`<button class="choose-file" @click=${() => this.renderRoot.querySelector<HTMLInputElement>('input[type="file"]')?.click()}>
-                Choose a newer home file
-              </button>
-              <input
-                type="file"
-                accept=".json,application/json"
-                hidden
-                @change=${(e: Event) => void this._chooseFile(e)}
-              />`
+          ? nothing
           : html`<button class="refresh" @click=${() => void this._preview()}>Refresh from planner</button>`}
+        <button class="choose-file" @click=${() => this.renderRoot.querySelector<HTMLInputElement>('input[type="file"]')?.click()}>
+          ${fromFile ? 'Choose a newer home file' : 'Use a home file instead'}
+        </button>
+        <input type="file" accept=".json,application/json" hidden @change=${(e: Event) => void this._chooseFile(e)} />
       </div>
       ${this._notice
         ? html`<p class=${classMap({ notice: true, error: this._notice.error })} role="status">${this._notice.text}</p>`

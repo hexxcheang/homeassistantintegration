@@ -21,7 +21,7 @@ export function subscribe(
   hass: HassLike,
   entryId: string,
   callback: (event: HomeEvent) => void,
-): Promise<() => void> {
+): Promise<() => void | Promise<void>> {
   return hass.connection.subscribeMessage<{ event: HomeEvent }>((msg) => callback(msg.event), {
     type: 'maxsen/subscribe',
     entry_id: entryId,

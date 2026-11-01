@@ -300,6 +300,40 @@ describe('createFakeHass: websocket', () => {
     expect(events).toHaveLength(2);
   });
 
+  it('restarts like Home Assistant: drops subscriptions, refuses maxsen commands while starting, then fires ready', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    const events: string[] = [];
+    await fake.connection.subscribeMessage<{ event: string }>((m) => events.push(m.event), {
+      type: 'maxsen/subscribe',
+      entry_id: ENTRY,
+    });
+    const ready = vi.fn();
+    fake.connection.addEventListener!('ready', ready);
+    const removed = vi.fn();
+    fake.connection.addEventListener!('ready', removed);
+    fake.connection.removeEventListener!('ready', removed);
+
+    fake.restart(3_000);
+
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(removed).not.toHaveBeenCalled();
+    await ws(fake, { type: 'maxsen/quick_panel/set', items: [] }).catch(() => undefined);
+    expect(events).toEqual([]);
+    await expect(
+      fake.connection.subscribeMessage(() => undefined, { type: 'maxsen/subscribe', entry_id: ENTRY }),
+    ).rejects.toMatchObject({ code: 'unknown_command' });
+    await expect(getHome(fake)).rejects.toMatchObject({ code: 'unknown_command' });
+
+    vi.advanceTimersByTime(3_000);
+    await fake.connection.subscribeMessage<{ event: string }>((m) => events.push(m.event), {
+      type: 'maxsen/subscribe',
+      entry_id: ENTRY,
+    });
+    await ws(fake, { type: 'maxsen/quick_panel/set', items: [] });
+    expect(events).toEqual(['quick_panel']);
+  });
+
   it('refuses to subscribe to something else', async () => {
     const fake = createFakeHass(fresh(), admin);
     await expect(

@@ -14,7 +14,12 @@ interface Fake {
   deliver(event: string): void;
   unsubscribe: ReturnType<typeof vi.fn<() => void>>;
   homeCalls(): number;
+  subscribeCalls(): number;
   setHome(home: HomeResponse): void;
+  /** The websocket came back after a drop (home-assistant-js-websocket's "ready" event). */
+  reconnect(): void;
+  /** How many "ready" listeners are registered. */
+  readyListeners(): number;
 }
 
 /** A hass whose websocket answers the Maxsen commands. */
@@ -35,14 +40,34 @@ function fakeHass(entries = [{ entry_id: 'e1', state: 'loaded' }], first = homeR
   vi.spyOn(hass, 'fetchWithAuth').mockImplementation(
     async () => new Response(new Blob(['png']), { status: 200 }),
   );
+  const ready = new Set<() => void>();
+  hass.connection.addEventListener = (event, listener) => {
+    if (event === 'ready') ready.add(listener);
+  };
+  hass.connection.removeEventListener = (event, listener) => {
+    if (event === 'ready') ready.delete(listener);
+  };
   return {
     hass,
     deliver: (event) => handler({ event }),
     unsubscribe,
     homeCalls: () => callWS.mock.calls.filter((c) => c[0].type === 'maxsen/home').length,
+    subscribeCalls: () => vi.mocked(hass.connection.subscribeMessage).mock.calls.length,
     setHome: (h) => (home = h),
+    reconnect: () => {
+      for (const listener of [...ready]) listener();
+    },
+    readyListeners: () => ready.size,
   };
 }
+
+/** Let pending promises and zero-delay timers run while timers are faked. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(0);
+}
+
+const UNKNOWN_COMMAND = { code: 'unknown_command', message: 'Unknown command.' };
+const NOT_FOUND = { code: 'not_found', message: 'Unknown home' };
 
 /** The text the view shows, one shadow root down from the panel. */
 const viewText = (panel: Element): string =>
@@ -169,6 +194,122 @@ describe('<maxsen-home-panel>', () => {
     resolve(early.unsubscribe);
     await new Promise((r) => setTimeout(r, 0));
     expect(early.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('<maxsen-home-panel> after Home Assistant restarts', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('loads and subscribes again when the connection is back, retrying while Maxsen is still starting', async () => {
+    const fake = fakeHass();
+    const panel = await mountPanel({ hass: fake.hass });
+    expect(fake.subscribeCalls()).toBe(1);
+    vi.useFakeTimers();
+    // Right after the restart the maxsen commands are not registered yet.
+    vi.mocked(fake.hass.connection.subscribeMessage).mockRejectedValueOnce(UNKNOWN_COMMAND);
+
+    fake.reconnect();
+    await flush();
+
+    expect(fake.unsubscribe).toHaveBeenCalledTimes(1); // the old subscription is let go
+    expect(fake.homeCalls()).toBe(2);
+    expect(fake.subscribeCalls()).toBe(2);
+    // The home stays on screen while it retries.
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).not.toBeNull();
+    expect(panel.shadowRoot!.textContent).not.toContain('Could not load the home');
+
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fake.subscribeCalls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(fake.subscribeCalls()).toBe(3);
+
+    // Events flow again.
+    fake.setHome(homeResponse({ links: { dl1: { type: 'entity', id: 'light.a' } } }));
+    fake.deliver('links');
+    await flush();
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')!.home?.links).toHaveProperty('dl1');
+
+    // Once it works it stops retrying.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(fake.subscribeCalls()).toBe(3);
+  });
+
+  it('backs off 2 s, 5 s, 10 s, then tries every 30 s', async () => {
+    const fake = fakeHass();
+    await mountPanel({ hass: fake.hass });
+    vi.useFakeTimers();
+    vi.mocked(fake.hass.connection.subscribeMessage).mockRejectedValue(UNKNOWN_COMMAND);
+
+    fake.reconnect();
+    await flush();
+    const tries = [fake.subscribeCalls()];
+    for (const wait of [2_000, 5_000, 10_000, 30_000, 30_000]) {
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect(fake.subscribeCalls()).toBe(tries[tries.length - 1]);
+      await vi.advanceTimersByTimeAsync(1);
+      await flush();
+      tries.push(fake.subscribeCalls());
+    }
+    expect(tries).toEqual([2, 3, 4, 5, 6, 7]);
+  });
+
+  it('retries a first load that fails while Maxsen is still loading', async () => {
+    vi.useFakeTimers();
+    const fake = fakeHass();
+    // The entry is listed, but maxsen/home answers not_found until it has finished loading.
+    const answer = vi.mocked(fake.hass.callWS).getMockImplementation()!;
+    let loading = true;
+    vi.mocked(fake.hass.callWS).mockImplementation((async (msg: { type: string }) => {
+      if (msg.type === 'maxsen/home' && loading) {
+        loading = false;
+        throw NOT_FOUND;
+      }
+      return answer(msg);
+    }) as never);
+    const panel = document.createElement('maxsen-home-panel') as MaxsenHomePanel;
+    panel.hass = fake.hass;
+    document.body.append(panel);
+    await flush();
+    expect(panel.shadowRoot!.textContent).toContain('Could not load the home');
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flush();
+
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).not.toBeNull();
+    expect(fake.subscribeCalls()).toBe(1);
+  });
+
+  it('stops retrying and stops listening for reconnects when removed', async () => {
+    const fake = fakeHass();
+    const panel = await mountPanel({ hass: fake.hass });
+    expect(fake.readyListeners()).toBe(1);
+    vi.useFakeTimers();
+    vi.mocked(fake.hass.connection.subscribeMessage).mockRejectedValue(UNKNOWN_COMMAND);
+    fake.reconnect();
+    await flush();
+    const calls = fake.subscribeCalls();
+
+    panel.remove();
+    await vi.advanceTimersByTimeAsync(120_000);
+    fake.reconnect();
+    await flush();
+
+    expect(fake.readyListeners()).toBe(0);
+    expect(fake.subscribeCalls()).toBe(calls);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('listens once, however often Home Assistant hands it a new hass', async () => {
+    const fake = fakeHass();
+    const panel = await mountPanel({ hass: fake.hass });
+    panel.hass = { ...fake.hass };
+    await settle(panel);
+    panel.hass = { ...fake.hass };
+    await settle(panel);
+    expect(fake.readyListeners()).toBe(1);
   });
 });
 

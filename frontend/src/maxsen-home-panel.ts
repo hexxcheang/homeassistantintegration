@@ -3,12 +3,29 @@ import { findEntryId, getHome, subscribe } from './api.ts';
 import './floorplan-view.ts';
 import './link-mode.ts';
 import './quick-panel.ts';
-import type { HassLike, HomeResponse } from './types.ts';
+import type { HassConnection, HassLike, HomeResponse } from './types.ts';
 
 /** Floor plan and quick panel sit side by side when the space is landscape and this wide. */
 const SIDE_BY_SIDE_MIN_WIDTH = 900;
 
 const NO_SELECTION: string[] = [];
+
+/** How long to wait before loading again after a failed load or subscribe: 2 s, 5 s, 10 s, then every 30 s. */
+const RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
+const RETRY_EVERY_MS = 30_000;
+
+export function retryDelay(attempt: number): number {
+  return RETRY_DELAYS_MS[attempt] ?? RETRY_EVERY_MS;
+}
+
+/** End a subscription without caring whether it still exists (after a reconnect it may not). */
+function release(unsubscribe: (() => void | Promise<void>) | undefined): void {
+  try {
+    void Promise.resolve(unsubscribe?.()).catch(() => undefined);
+  } catch {
+    // Already gone.
+  }
+}
 
 export type PanelLayout = 'side' | 'stacked';
 
@@ -57,8 +74,13 @@ export class MaxsenHomePanel extends LitElement {
   private _started = false;
   /** Bumped on every stop, so a load that finishes late can tell it is no longer wanted. */
   private _run = 0;
-  private _unsubscribe: (() => void) | undefined;
+  private _unsubscribe: (() => void | Promise<void>) | undefined;
   private _observer: ResizeObserver | undefined;
+  /** Failed loads in a row, for the retry delay. */
+  private _attempt = 0;
+  private _retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The connection whose `ready` (reconnected) event this panel listens to. */
+  private _connection: HassConnection | undefined;
 
   constructor() {
     super();
@@ -79,13 +101,32 @@ export class MaxsenHomePanel extends LitElement {
       });
       this._observer.observe(this);
     }
+    if (this.hass) this._listen(this.hass.connection);
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this._observer?.disconnect();
     this._observer = undefined;
+    this._listen(undefined);
     this._stop();
+  }
+
+  /**
+   * After Home Assistant restarts, the websocket reconnects but the maxsen subscription is gone
+   * (or is refused while Maxsen is still loading). On `ready` the panel loads and subscribes again.
+   */
+  private _onReconnect = (): void => {
+    if (!this._started) return;
+    this._attempt = 0;
+    this._resubscribe();
+  };
+
+  private _listen(connection: HassConnection | undefined): void {
+    if (connection === this._connection) return;
+    this._connection?.removeEventListener?.('ready', this._onReconnect);
+    this._connection = connection;
+    connection?.addEventListener?.('ready', this._onReconnect);
   }
 
   /** Installer tools need an administrator and installer mode; the server checks both too. */
@@ -104,6 +145,7 @@ export class MaxsenHomePanel extends LitElement {
 
   override updated(changed: Map<PropertyKey, unknown>): void {
     if (!this.hass) return;
+    if (this.isConnected) this._listen(this.hass.connection);
     // The card can be pointed at another home while it is on screen.
     if (this._started && changed.has('panel') && this.panel?.config?.entry_id !== this._entryId) {
       this._stop();
@@ -114,16 +156,28 @@ export class MaxsenHomePanel extends LitElement {
   private _stop(): void {
     this._run++;
     this._started = false;
-    this._unsubscribe?.();
+    this._attempt = 0;
+    clearTimeout(this._retryTimer);
+    this._retryTimer = undefined;
+    release(this._unsubscribe);
     this._unsubscribe = undefined;
   }
 
-  private async _start(): Promise<void> {
+  /** Load and subscribe again, keeping what is on screen meanwhile. */
+  private _resubscribe(): void {
+    const attempt = this._attempt;
+    this._stop();
+    this._attempt = attempt;
+    void this._start(true);
+  }
+
+  /** `quiet` keeps showing the current home (or error) instead of "Loading…". */
+  private async _start(quiet = false): Promise<void> {
     const hass = this.hass;
     if (!hass) return;
     this._started = true;
     const run = this._run;
-    this._status = 'loading';
+    if (!quiet) this._status = 'loading';
     try {
       const entryId = this.panel?.config?.entry_id ?? (await findEntryId(hass));
       if (run !== this._run) return;
@@ -137,10 +191,21 @@ export class MaxsenHomePanel extends LitElement {
       this._home = home;
       this._status = 'ready';
       const unsubscribe = await subscribe(hass, entryId, () => void this._reload(run));
-      if (run !== this._run) unsubscribe();
-      else this._unsubscribe = unsubscribe;
+      if (run !== this._run) {
+        release(unsubscribe);
+        return;
+      }
+      this._unsubscribe = unsubscribe;
+      this._attempt = 0;
     } catch {
-      if (run === this._run) this._status = 'error';
+      if (run !== this._run) return;
+      // A quiet retry keeps showing the home we have; otherwise say it could not be loaded. Either
+      // way try again by itself: right after a restart Maxsen may still be loading.
+      if (!quiet || !this._home) this._status = 'error';
+      this._retryTimer = setTimeout(() => {
+        this._retryTimer = undefined;
+        if (run === this._run) this._resubscribe();
+      }, retryDelay(this._attempt++));
     }
   }
 

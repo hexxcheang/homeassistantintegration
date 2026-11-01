@@ -274,13 +274,21 @@ export interface HassArea {
   name: string;
 }
 
+/** The connection events of home-assistant-js-websocket; `ready` fires when it is back after a drop. */
+export type HassConnectionEvent = 'ready' | 'disconnected' | 'reconnect-error';
+
 /** The websocket connection on the Home Assistant frontend's `hass` object. */
 export interface HassConnection {
-  /** Resolves to the function that ends the subscription. */
+  /**
+   * Resolves to the function that ends the subscription. In Home Assistant that function returns
+   * a promise, which rejects when the subscription is already gone.
+   */
   subscribeMessage<T>(
     callback: (message: T) => void,
     subscribeMessage: { type: string; [key: string]: unknown },
-  ): Promise<() => void>;
+  ): Promise<() => void | Promise<void>>;
+  addEventListener?(event: HassConnectionEvent, listener: () => void): void;
+  removeEventListener?(event: HassConnectionEvent, listener: () => void): void;
 }
 
 export interface HassLike {

@@ -47,6 +47,12 @@ export interface FakeHass extends HassLike {
   revokePairing(): void;
   /** Keep a file for `maxsen/refresh/preview` with `file_id`. Returns the id. */
   uploadFile(pkg: HomePackage): string;
+  /**
+   * Pretend Home Assistant restarted: subscriptions are dropped, the connection fires `ready` (as
+   * home-assistant-js-websocket does after reconnecting) and the maxsen commands answer
+   * `unknown_command` for `startingMs` while the integration is still loading.
+   */
+  restart(startingMs?: number): void;
   /** Flip the door sensors every 20 s so alerts can be seen. Returns the stop function. */
   startSimulation(everyMs?: number): () => void;
 }
@@ -361,6 +367,14 @@ export function createFakeHass(
   let counter = 0;
   const listeners = new Set<() => void>();
   const subscribers = new Set<(event: HomeEvent) => void>();
+  const readyListeners = new Set<() => void>();
+  /** Until this time (ms) the maxsen commands are not registered yet, as right after a restart. */
+  let startingUntil = 0;
+  function requireStarted(type: string): void {
+    if (type.startsWith('maxsen/') && Date.now() < startingUntil) {
+      throw new CommandError('unknown_command', 'Unknown command.');
+    }
+  }
 
   const draft = (): World => ({
     states: { ...fake.states },
@@ -649,6 +663,7 @@ export function createFakeHass(
   }
 
   async function callWS<T>(msg: Message): Promise<T> {
+    requireStarted(msg.type);
     const result = ((): unknown => {
       switch (msg.type) {
         case 'config_entries/get':
@@ -691,10 +706,17 @@ export function createFakeHass(
         if (message.type !== 'maxsen/subscribe') {
           throw new CommandError('unknown_command', `Unknown command ${message.type}`);
         }
+        requireStarted(message.type);
         requireHome(message);
         const subscriber = (event: HomeEvent): void => callback({ event } as T);
         subscribers.add(subscriber);
         return () => void subscribers.delete(subscriber);
+      },
+      addEventListener(event, listener) {
+        if (event === 'ready') readyListeners.add(listener);
+      },
+      removeEventListener(event, listener) {
+        if (event === 'ready') readyListeners.delete(listener);
       },
     },
     async fetchWithAuth(path: string, init?: RequestInit): Promise<Response> {
@@ -748,6 +770,11 @@ export function createFakeHass(
       const id = `file-${++counter}`;
       files.set(id, file);
       return id;
+    },
+    restart(startingMs = 5_000) {
+      subscribers.clear();
+      startingUntil = Date.now() + startingMs;
+      for (const listener of [...readyListeners]) listener();
     },
     startSimulation(everyMs = DOOR_FLIP_MS) {
       const timer = setInterval(() => {

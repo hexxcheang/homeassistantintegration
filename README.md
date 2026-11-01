@@ -98,7 +98,8 @@ Use a non-admin user (checklist step 6), never an administrator.
   app that keeps the screen on and remembers the sign-in works best.
 
 The panel switches between a wide layout (drawing with the quick panel beside it) and a phone
-layout (quick panel under the drawing) by itself.
+layout (quick panel under the drawing) by itself. After Home Assistant restarts, the panel
+reconnects by itself and keeps showing the home meanwhile; there is no need to reload it.
 
 ## Updating the home after planner changes
 

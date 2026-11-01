@@ -1053,6 +1053,50 @@ describe('overlapping devices (the picker)', () => {
     expect(picker(view)).toBeNull();
   });
 
+  it('M1: a finger that drifts after a hold has opened the picker does not pan the drawing under it', async () => {
+    const view = await mountView({ hass: clusterHass(), home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    const c = elementPoint(view, 'sw1');
+    wheel(stageOf(view), -300, c.x, c.y);
+    await settle(view);
+    const canvas = stageOf(view).querySelector<HTMLElement>('.canvas')!;
+    const zoomed = canvas.style.transform;
+    expect(zoomed).toMatch(/scale\(1\.[3-9]/);
+    vi.useFakeTimers();
+
+    const at = elementPoint(view, 'sw1');
+    pointer(stageOf(view), 'pointerdown', at);
+    vi.advanceTimersByTime(600);
+    await view.updateComplete;
+    expect(picker(view)).not.toBeNull();
+    pointer(stageOf(view), 'pointermove', { x: at.x + 30, y: at.y + 20 });
+    pointer(stageOf(view), 'pointermove', { x: at.x + 60, y: at.y + 40 });
+    await view.updateComplete;
+
+    expect(canvas.style.transform).toBe(zoomed);
+    expect(picker(view)).not.toBeNull();
+    pointer(stageOf(view), 'pointerup', { x: at.x + 60, y: at.y + 40 });
+    expect(canvas.style.transform).toBe(zoomed);
+  });
+
+  it('M1: a drag that starts on empty drawing or before the hold still pans', async () => {
+    const view = await mountView({ hass: clusterHass(), home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    const c = elementPoint(view, 'sw1');
+    wheel(stageOf(view), -300, c.x, c.y);
+    await settle(view);
+    const canvas = stageOf(view).querySelector<HTMLElement>('.canvas')!;
+    const zoomed = canvas.style.transform;
+    vi.useFakeTimers();
+
+    const at = elementPoint(view, 'sw1');
+    pointer(stageOf(view), 'pointerdown', at);
+    pointer(stageOf(view), 'pointermove', { x: at.x + 30, y: at.y });
+    vi.advanceTimersByTime(600);
+    await view.updateComplete;
+
+    expect(canvas.style.transform).not.toBe(zoomed);
+    expect(picker(view)).toBeNull();
+  });
+
   it('in link mode, a tap on a cluster opens the picker and choosing emits maxsen-element-tap for that id', async () => {
     const hass = clusterHass();
     const call = vi.spyOn(hass, 'callService');

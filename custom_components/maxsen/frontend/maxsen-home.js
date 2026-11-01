@@ -1437,11 +1437,13 @@ var dn = class extends U {
 			return;
 		}
 		let i = this._press;
-		if (i && i.id === e.pointerId && !i.moved) {
-			if (Math.hypot(n.x - i.x, n.y - i.y) <= zt) return;
-			i.moved = !0, this._cancelHold();
+		if (!(i && i.id === e.pointerId && i.long)) {
+			if (i && i.id === e.pointerId && !i.moved) {
+				if (Math.hypot(n.x - i.x, n.y - i.y) <= zt) return;
+				i.moved = !0, this._cancelHold();
+			}
+			(!i || i.moved) && (this._view.x += n.x - t.x, this._view.y += n.y - t.y, this._applyView());
 		}
-		(!i || i.moved) && (this._view.x += n.x - t.x, this._view.y += n.y - t.y, this._applyView());
 	}
 	_onUp(e) {
 		this._pointers.delete(e.pointerId), this._pointers.size < 2 && (this._pinch = void 0);

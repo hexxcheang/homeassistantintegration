@@ -231,7 +231,6 @@ export interface QuickItem {
   id: string;
 }
 
-/** The `maxsen/home` result. */
 /** How a plan's background drawing is shown: `soft` fades it back, `original` shows it as drawn. */
 export type DisplayBackground = 'soft' | 'original';
 
@@ -239,6 +238,7 @@ export interface DisplaySettings {
   background: DisplayBackground;
 }
 
+/** The `maxsen/home` result. */
 export interface HomeResponse {
   package: StoredHomePackage | null;
   /** Planner element id to its link; unlinked elements are absent. */

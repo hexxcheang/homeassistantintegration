@@ -512,6 +512,8 @@ export class MaxsenFloorplanView extends LitElement {
     }
 
     const press = this._press;
+    // A hold has already acted (the picker or the details are open): the finger drifting on is not a pan.
+    if (press && press.id === e.pointerId && press.long) return;
     if (press && press.id === e.pointerId && !press.moved) {
       if (Math.hypot(p.x - press.x, p.y - press.y) <= MOVE_TOLERANCE) return;
       press.moved = true;

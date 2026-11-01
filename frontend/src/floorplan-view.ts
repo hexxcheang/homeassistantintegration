@@ -40,6 +40,9 @@ const PILLED = new Set<string>(['sensors', 'aircon-controllers', 'curtains-blind
 
 const LAYER_LABELS: Record<Layer, string> = { all: 'All', 'smart-home': 'Smart Home', lighting: 'Lighting' };
 
+/** Each view names its own soft-background filter: several cards can share one dashboard page. */
+let softFilterCount = 0;
+
 const IDENTITY = 'translate(0px, 0px) scale(1)';
 
 const round = (n: number): number => Math.round(n * 100) / 100;
@@ -121,6 +124,7 @@ export class MaxsenFloorplanView extends LitElement {
   private _observer: ResizeObserver | undefined;
   private _observed: Element | undefined;
   private _shownPlans = '';
+  private readonly _softFilterId = `maxsen-soft-${++softFilterCount}`;
 
   constructor() {
     super();
@@ -618,6 +622,16 @@ export class MaxsenFloorplanView extends LitElement {
             <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ffb22e" flood-opacity="0.95" result="near" />
             <feDropShadow in="near" dx="0" dy="0" stdDeviation="16" flood-color="#ffb22e" flood-opacity="0.7" />
           </filter>
+          <!-- Greyscale, then the CSS contrast(0.55) brightness(1.25) as one linear step. An SVG filter,
+               because WebKit does not apply CSS filter functions to SVG children. -->
+          <filter id=${this._softFilterId} color-interpolation-filters="sRGB">
+            <feColorMatrix type="saturate" values="0" />
+            <feComponentTransfer>
+              <feFuncR type="linear" slope="0.6875" intercept="0.28125" />
+              <feFuncG type="linear" slope="0.6875" intercept="0.28125" />
+              <feFuncB type="linear" slope="0.6875" intercept="0.28125" />
+            </feComponentTransfer>
+          </filter>
           <!-- A straight line has no area, so this one is sized in plan units, not by the shape. -->
           <filter id="maxsen-glow-path" filterUnits="userSpaceOnUse" x="0" y="0" width=${first.width} height=${first.height} color-interpolation-filters="sRGB">
             <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ffb22e" flood-opacity="0.95" result="near" />
@@ -629,6 +643,7 @@ export class MaxsenFloorplanView extends LitElement {
           ? svg`<image
               class=${classMap({ background: true, soft })}
               href=${image}
+              filter=${ifDefined(soft ? `url(#${this._softFilterId})` : undefined)}
               width=${first.width}
               height=${first.height}
               preserveAspectRatio="none"
@@ -830,7 +845,6 @@ export class MaxsenFloorplanView extends LitElement {
     }
     /* The plan's own drawing is the point: fade the background so the markers stand out. */
     image.soft {
-      filter: grayscale(1) contrast(0.55) brightness(1.25);
       opacity: 0.6;
     }
     .element {

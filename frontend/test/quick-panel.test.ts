@@ -230,6 +230,14 @@ describe('the header', () => {
     expect(slot.closest('.head')).not.toBeNull();
     expect(text(q(el, '.edit'))).toBe('Edit');
   });
+
+  it('wraps its buttons under the title rather than clipping them in a narrow column', () => {
+    const css = (document.createElement('maxsen-quick-panel').constructor as unknown as {
+      styles: { cssText: string };
+    }).styles.cssText;
+    expect(css).toMatch(/\.head\s*\{[^}]*flex-wrap:\s*wrap/);
+    expect(css).toMatch(/\.actions\s*\{[^}]*flex-wrap:\s*wrap/);
+  });
 });
 
 describe('Edit', () => {

@@ -465,8 +465,10 @@ export class MaxsenQuickPanel extends LitElement {
     }
     .head {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
+      gap: 0 8px;
       padding: 8px 12px 0 16px;
     }
     .head h3 {
@@ -475,6 +477,7 @@ export class MaxsenQuickPanel extends LitElement {
     }
     .actions {
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
     }
     .edit {

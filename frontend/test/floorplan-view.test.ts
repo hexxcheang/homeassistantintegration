@@ -253,15 +253,35 @@ describe('levels and plan types', () => {
 });
 
 describe('background', () => {
-  it('softens the background image when the display setting is soft', async () => {
+  const filterOf = (view: HTMLElement) => root(view).querySelector('image')?.getAttribute('filter') ?? null;
+  const idOf = (reference: string | null) => /^url\(#(.+)\)$/.exec(reference ?? '')?.[1];
+
+  it('softens the background image with an SVG filter when the display setting is soft', async () => {
     const view = await mountView({ hass: withImages(), home: homeResponse({ display: { background: 'soft' } }) });
-    expect(root(view).querySelector('image')?.classList.contains('soft')).toBe(true);
+    const image = root(view).querySelector('image')!;
+    expect(image.classList.contains('soft')).toBe(true);
+    // An SVG filter, not a CSS one: WebKit ignores CSS filter functions on SVG children.
+    const id = idOf(filterOf(view));
+    expect(id).toBeTruthy();
+    const filter = root(view).querySelector(`filter[id="${id}"]`);
+    expect(filter).not.toBeNull();
+    expect(filter?.querySelector('feColorMatrix')?.getAttribute('type')).toBe('saturate');
+    expect(filter?.querySelector('feColorMatrix')?.getAttribute('values')).toBe('0');
+    expect(filter?.querySelector('feComponentTransfer feFuncR')?.getAttribute('type')).toBe('linear');
   });
 
   it('shows the background as drawn when the display setting is original', async () => {
     const view = await mountView({ hass: withImages(), home: homeResponse({ display: { background: 'original' } }) });
     expect(root(view).querySelector('image')).not.toBeNull();
     expect(root(view).querySelector('image')?.classList.contains('soft')).toBe(false);
+    expect(root(view).querySelector('image')?.hasAttribute('filter')).toBe(false);
+  });
+
+  it('gives every view its own filter id, so several cards on one dashboard do not clash', async () => {
+    const a = await mountView({ hass: withImages(), home: homeResponse() });
+    const b = await mountView({ hass: withImages(), home: homeResponse() });
+    expect(idOf(filterOf(a))).toBeTruthy();
+    expect(idOf(filterOf(a))).not.toBe(idOf(filterOf(b)));
   });
 });
 

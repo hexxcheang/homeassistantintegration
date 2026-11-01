@@ -153,6 +153,26 @@ async def save_images(hass: HomeAssistant, entry_id: str, pkg: dict) -> dict:
     return slim
 
 
+def _remove_unreferenced(folder: Path, keep: set[str]) -> None:
+    if not folder.is_dir():
+        return
+    for path in folder.iterdir():
+        if path.is_file() and path.name not in keep:
+            path.unlink()
+
+
+async def remove_unreferenced_images(
+    hass: HomeAssistant, entry_id: str, slim: dict
+) -> None:
+    """Delete saved image files that the (slim) package no longer references."""
+    keep = {
+        f"{image_id}.{IMAGE_EXTENSIONS[media_type]}"
+        for image_id, media_type in slim["image_types"].items()
+    }
+    folder = Path(hass.config.path("maxsen", entry_id))
+    await hass.async_add_executor_job(_remove_unreferenced, folder, keep)
+
+
 def element_index(pkg: dict) -> dict[str, dict[str, Any]]:
     """Map element id to the element plus its level and plan."""
     index: dict[str, dict[str, Any]] = {}
@@ -186,5 +206,41 @@ def diff_packages(old: dict, new: dict) -> dict[str, list[str]]:
             for plan in level["plans"]
             if plan["id"] in old_revisions
             and old_revisions[plan["id"]] != plan["revision"]
+        ],
+    }
+
+
+def describe_changes(old: dict | None, new: dict) -> dict[str, list[dict[str, str]]]:
+    """What changes from ``old`` to ``new``, with names an installer recognises.
+
+    Removed elements are described from the old package, added ones from the new.
+    """
+    old = old or {"levels": []}
+    diff = diff_packages(old, new)
+    old_elements = element_index(old)
+    new_elements = element_index(new)
+    old_levels = {level["id"]: level["name"] for level in old["levels"]}
+    new_levels = {level["id"]: level["name"] for level in new["levels"]}
+
+    def element(element_id: str, elements: dict, levels: dict) -> dict[str, str]:
+        found = elements[element_id]
+        return {
+            "id": element_id,
+            "productName": found.get("productName", ""),
+            "label": found.get("label", ""),
+            "levelName": levels[found["levelId"]],
+        }
+
+    plans = {
+        plan["id"]: (level["name"], plan["type"])
+        for level in new["levels"]
+        for plan in level["plans"]
+    }
+    return {
+        "added": [element(i, new_elements, new_levels) for i in diff["added"]],
+        "removed": [element(i, old_elements, old_levels) for i in diff["removed"]],
+        "changed_drawings": [
+            {"planId": plan_id, "levelName": plans[plan_id][0], "type": plans[plan_id][1]}
+            for plan_id in diff["changed_drawings"]
         ],
     }

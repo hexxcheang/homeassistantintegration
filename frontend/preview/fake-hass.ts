@@ -7,6 +7,7 @@
 import type { HomeEvent } from '../src/api.ts';
 import { LIGHTING_CATEGORIES } from '../src/link-candidates.ts';
 import type {
+  ChangedDrawing,
   ChangedElement,
   HassArea,
   HassDevice,
@@ -105,30 +106,37 @@ function elementsOf(pkg: HomePackage): Map<string, HomeElement> {
   return out;
 }
 
-const describe = (el: HomeElement): ChangedElement => ({
-  id: el.id,
-  productName: el.productName,
-  label: el.label,
-});
+/** Every element as a refresh summary shows it, with the name of its level. */
+function describedElements(pkg: HomePackage): Map<string, ChangedElement> {
+  const out = new Map<string, ChangedElement>();
+  for (const level of pkg.levels) {
+    for (const plan of level.plans) {
+      for (const el of plan.elements) {
+        out.set(el.id, { id: el.id, productName: el.productName, label: el.label, levelName: level.name });
+      }
+    }
+  }
+  return out;
+}
 
-/** Added and removed elements, and the elements of plans that were redrawn (revision changed). */
+/** Added and removed elements, and the plans that were redrawn (revision changed). */
 function diff(oldPkg: HomePackage, newPkg: HomePackage): Preview['summary'] {
-  const before = elementsOf(oldPkg);
-  const after = elementsOf(newPkg);
+  const before = describedElements(oldPkg);
+  const after = describedElements(newPkg);
   const revisions = new Map(
     oldPkg.levels.flatMap((l) => l.plans.map((p) => [p.id, p.revision] as const)),
   );
-  const changed: ChangedElement[] = [];
+  const changed: ChangedDrawing[] = [];
   for (const level of newPkg.levels) {
     for (const plan of level.plans) {
       const old = revisions.get(plan.id);
       if (old === undefined || old === plan.revision) continue;
-      for (const el of plan.elements) if (before.has(el.id)) changed.push(describe(el));
+      changed.push({ planId: plan.id, levelName: level.name, type: plan.type });
     }
   }
   return {
-    added: [...after.values()].filter((e) => !before.has(e.id)).map(describe),
-    removed: [...before.values()].filter((e) => !after.has(e.id)).map(describe),
+    added: [...after.values()].filter((e) => !before.has(e.id)),
+    removed: [...before.values()].filter((e) => !after.has(e.id)),
     changed_drawings: changed,
   };
 }

@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import secrets
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import EVENT_QUICK_PANEL_UPDATED, SIGNAL_UPDATED
 
 STORAGE_VERSION = 1
+PREVIEW_LIFETIME = timedelta(minutes=10)
 
 
 def _empty() -> dict[str, Any]:
@@ -31,6 +35,9 @@ class MaxsenStore:
             hass, STORAGE_VERSION, f"maxsen.{entry_id}"
         )
         self.data: dict[str, Any] = _empty()
+        # The one live refresh preview: (preview id, expiry, parsed package with
+        # images). Memory only; a restart or a newer preview drops it.
+        self._preview: tuple[str, datetime, dict[str, Any]] | None = None
 
     async def async_load(self) -> None:
         """Load what was saved before; start empty when nothing was."""
@@ -72,3 +79,47 @@ class MaxsenStore:
         self._hass.bus.async_fire(
             EVENT_QUICK_PANEL_UPDATED, {"entry_id": self._entry_id}
         )
+
+    def keep_preview(self, pkg: dict[str, Any]) -> str:
+        """Hold a parsed package for ten minutes, replacing any earlier preview."""
+        preview_id = secrets.token_hex(16)
+        self._preview = (preview_id, dt_util.utcnow() + PREVIEW_LIFETIME, pkg)
+        return preview_id
+
+    def take_preview(self, preview_id: str) -> dict[str, Any] | None:
+        """Return and forget the preview, or None when unknown or expired."""
+        if self._preview is None:
+            return None
+        kept_id, expires_at, pkg = self._preview
+        if dt_util.utcnow() > expires_at:
+            self._preview = None
+            return None
+        if kept_id != preview_id:
+            return None
+        self._preview = None
+        return pkg
+
+    async def async_apply_refresh(
+        self, slim: dict[str, Any], removed_ids: set[str]
+    ) -> None:
+        """Save a refreshed package and drop links and quick-panel items of removed elements."""
+        self.data["package"] = slim
+        self.data["links"] = {
+            element_id: link
+            for element_id, link in self.data["links"].items()
+            if element_id not in removed_ids
+        }
+        panel = [
+            item
+            for item in self.data["quick_panel"]
+            if not (item["type"] == "element" and item["id"] in removed_ids)
+        ]
+        panel_changed = len(panel) != len(self.data["quick_panel"])
+        self.data["quick_panel"] = panel
+        await self._store.async_save(self.data)
+        for event in ("home", "links", "quick_panel"):
+            self._announce(event)
+        if panel_changed:
+            self._hass.bus.async_fire(
+                EVENT_QUICK_PANEL_UPDATED, {"entry_id": self._entry_id}
+            )

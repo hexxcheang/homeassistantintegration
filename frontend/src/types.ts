@@ -302,6 +302,14 @@ export interface ChangedElement {
   id: string;
   productName: string;
   label: string;
+  levelName: string;
+}
+
+/** A floor plan whose drawing was redone in the planner. */
+export interface ChangedDrawing {
+  planId: string;
+  levelName: string;
+  type: 'smart-home' | 'lighting';
 }
 
 /** What `maxsen/refresh/preview` and `maxsen/refresh/apply` report. */
@@ -309,5 +317,5 @@ export interface RefreshSummary {
   preview_id: string;
   added: ChangedElement[];
   removed: ChangedElement[];
-  changed_drawings: ChangedElement[];
+  changed_drawings: ChangedDrawing[];
 }

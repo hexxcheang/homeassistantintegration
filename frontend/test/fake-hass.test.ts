@@ -420,15 +420,23 @@ describe('createFakeHass: refresh', () => {
     fake.setPlannerPackage(changedPackage());
     const summary = await ws<RefreshSummary>(fake, { type: 'maxsen/refresh/preview' });
     expect(ids(summary.added)).toEqual(['dl9']);
-    expect(summary.added[0]).toEqual({ id: 'dl9', productName: 'Luna Downlight', label: 'Porch light' });
+    expect(summary.added[0]).toEqual({
+      id: 'dl9',
+      productName: 'Luna Downlight',
+      label: 'Porch light',
+      levelName: 'Level 1',
+    });
     expect(ids(summary.removed)).toEqual(['dl1', 'sw1']);
     expect(summary.removed.find((e) => e.id === 'sw1')).toEqual({
       id: 'sw1',
       productName: 'Ark Series',
       label: 'Entrance switch',
+      levelName: 'Level 1',
     });
-    // The lighting plan was redrawn: its surviving elements are listed (dl9 is under added)
-    expect(ids(summary.changed_drawings)).toEqual(['dl2', 'dl3', 'led1']);
+    // The lighting plan was redrawn
+    expect(summary.changed_drawings).toEqual([
+      { planId: 'plan-1-lt', levelName: 'Level 1', type: 'lighting' },
+    ]);
     // Preview changes nothing
     expect((await getHome(fake)).links).toHaveProperty('sw1');
   });

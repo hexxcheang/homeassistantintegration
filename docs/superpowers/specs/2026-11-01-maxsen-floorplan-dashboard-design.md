@@ -179,7 +179,7 @@ side):
 
 ### Import and refresh
 - The integration's setup flow takes either a pairing code (and planner
-  address) or an uploaded zip. The package and images are stored in HA's
+  address) or an uploaded home file. The package and images are stored in HA's
   config storage and served to the card.
 - Refresh and re-upload replace drawings and keep links for element ids that
   still exist, then report devices that were added (need linking) and removed
@@ -236,7 +236,7 @@ customers can remove them.
   build tooling, and how the integration registers the card.
 - The integration ↔ card API (websocket commands) and storage layout.
 - Exact visuals for each state, the zoom/pan implementation, popup design.
-- Exact zip schema beyond the fields listed, and how the planner gathers the
+- Exact package schema beyond the fields listed, and how the planner gathers the
   scenes and images (reusing existing export code where possible).
 - Where "Connect to Home Assistant" and the file download sit in the planner
   UI, and how the planner stores connection tokens.

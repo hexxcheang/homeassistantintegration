@@ -16,7 +16,28 @@ export interface PathHit {
   hitRadius: number;
 }
 
-export type HitItem = MarkerHit | PathHit;
+/**
+ * A box's touch area (a reading pill, a text label): the box from (`x`, `y`), its top-left corner,
+ * `w` wide and `h` high, grown by `hitRadius` all round with rounded corners.
+ */
+export interface RectHit {
+  elementId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  hitRadius: number;
+}
+
+export type HitItem = MarkerHit | PathHit | RectHit;
+
+/** Distance from `p` to the box: 0 anywhere inside it. */
+export function distanceToRect(p: Pt, rect: Pick<RectHit, 'x' | 'y' | 'w' | 'h'>): number {
+  return Math.hypot(
+    Math.max(rect.x - p.x, 0, p.x - (rect.x + rect.w)),
+    Math.max(rect.y - p.y, 0, p.y - (rect.y + rect.h)),
+  );
+}
 
 /** Distance from `p` to the segment a-b: perpendicular beside it, to the nearest end beyond it. */
 function distanceToSegment(p: Pt, a: Pt, b: Pt): number {
@@ -42,21 +63,21 @@ export function distanceToPath(point: Pt, points: Pt[], closed = false): number 
 
 /**
  * The elements whose touch area holds `point`, nearest first. Everything is in the same unit
- * (screen pixels in the view). Items at the same distance keep their given order.
+ * (screen pixels in the view). An element with several areas (a marker and its reading) is listed
+ * once, at its nearest one. Elements at the same distance keep the order they first appear in.
  */
 export function elementsAt(point: Pt, items: readonly HitItem[]): string[] {
-  const hits: { elementId: string; distance: number }[] = [];
-  const seen = new Set<string>();
+  const nearest = new Map<string, number>();
   for (const item of items) {
-    if (seen.has(item.elementId)) continue;
     const distance =
       'points' in item
         ? distanceToPath(point, item.points, item.closed)
-        : Math.hypot(point.x - item.x, point.y - item.y);
+        : 'w' in item
+          ? distanceToRect(point, item)
+          : Math.hypot(point.x - item.x, point.y - item.y);
     if (distance > item.hitRadius) continue;
-    seen.add(item.elementId);
-    hits.push({ elementId: item.elementId, distance });
+    nearest.set(item.elementId, Math.min(distance, nearest.get(item.elementId) ?? Infinity));
   }
-  // Array.prototype.sort is stable, so equal distances keep the input order.
-  return hits.sort((a, b) => a.distance - b.distance).map((h) => h.elementId);
+  // Array.prototype.sort is stable, so equal distances keep the order the elements were first hit in.
+  return [...nearest].sort((a, b) => a[1] - b[1]).map(([elementId]) => elementId);
 }

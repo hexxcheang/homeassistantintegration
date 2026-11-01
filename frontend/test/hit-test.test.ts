@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distanceToPath, elementsAt } from '../src/hit-test.ts';
+import { distanceToPath, distanceToRect, elementsAt } from '../src/hit-test.ts';
 
 describe('elementsAt', () => {
   const a = { elementId: 'a', x: 100, y: 100, hitRadius: 22 };
@@ -91,5 +91,35 @@ describe('distanceToPath', () => {
     const open = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
     expect(distanceToPath({ x: 40, y: 40 }, open)).toBe(40);
     expect(distanceToPath({ x: 40, y: 40 }, open, true)).toBeCloseTo(0, 5);
+  });
+});
+
+describe('elementsAt with box items', () => {
+  const pill = { elementId: 'sen', x: 100, y: 50, w: 70, h: 24, hitRadius: 0 };
+
+  it('hits inside the box, anywhere in it, and not beyond its edge', () => {
+    expect(elementsAt({ x: 165, y: 55 }, [pill])).toEqual(['sen']);
+    expect(elementsAt({ x: 170, y: 74 }, [pill])).toEqual(['sen']);
+    expect(elementsAt({ x: 170.5, y: 55 }, [pill])).toEqual([]);
+    expect(elementsAt({ x: 130, y: 74.5 }, [pill])).toEqual([]);
+    expect(elementsAt({ x: 130, y: 49.5 }, [pill])).toEqual([]);
+  });
+
+  it('reaches hitRadius beyond the box, measured to its edge, rounded at the corners', () => {
+    const roomy = { ...pill, hitRadius: 4 };
+    expect(elementsAt({ x: 174, y: 60 }, [roomy])).toEqual(['sen']);
+    expect(elementsAt({ x: 175, y: 60 }, [roomy])).toEqual([]);
+    expect(elementsAt({ x: 173, y: 77 }, [roomy])).toEqual([]);
+    expect(elementsAt({ x: 172, y: 76 }, [roomy])).toEqual(['sen']);
+    expect(distanceToRect({ x: 100, y: 50 }, roomy)).toBe(0);
+  });
+
+  it('lists an element once, at its nearest area, however many areas it has', () => {
+    const marker = { elementId: 'sen', x: 60, y: 50, hitRadius: 22 };
+    const other = { elementId: 'other', x: 120, y: 55, hitRadius: 22 };
+    // Inside the pill (distance 0), 65 from the marker, 5 from the other: the pill's distance counts, so it heads the list.
+    expect(elementsAt({ x: 125, y: 55 }, [marker, other, pill])).toEqual(['sen', 'other']);
+    // Only the marker reaches here.
+    expect(elementsAt({ x: 40, y: 50 }, [marker, other, pill])).toEqual(['sen']);
   });
 });

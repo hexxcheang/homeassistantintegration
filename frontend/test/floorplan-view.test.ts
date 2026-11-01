@@ -3,7 +3,7 @@ import { MaxsenFloorplanView } from '../src/floorplan-view.ts';
 import type { HomePackage, HomeResponse, Link, ScenePath, StoredHomePackage } from '../src/types.ts';
 import { contentBox } from '../src/view-geometry.ts';
 import { home, makeHass } from './helpers.ts';
-import { STAGE, group, homeResponse, mountView, pointer, elementPoint, pressElement, releaseElement, root, settle, stageOf, tap, tapElement, wheel } from './view-helpers.ts';
+import { STAGE, group, homeResponse, mountView, planPoint, pointer, elementPoint, pressElement, releaseElement, root, settle, stageOf, tap, tapElement, wheel } from './view-helpers.ts';
 
 const SWITCH_DEVICE: Link = { type: 'device', id: 'dev-hall' };
 const LIGHT: Link = { type: 'entity', id: 'light.kitchen' };
@@ -771,6 +771,99 @@ describe('images', () => {
     const view = await mountView({ hass: makeHass(), home: homeResponse() });
     expect(root(view).querySelectorAll('g[data-element-id]')).toHaveLength(8);
     expect(root(view).querySelector('image')).toBeNull();
+  });
+});
+
+// ---- readings beside devices ----
+
+const SENSOR_LINKS: Record<string, Link> = { sen1: { type: 'entity', id: 'sensor.temp' }, sw1: { type: 'entity', id: 'switch.hall' } };
+
+function sensorHass() {
+  return withImages(
+    makeHass({
+      states: {
+        'sensor.temp': { state: '24', attributes: { unit_of_measurement: '°C' } },
+        'switch.hall': { state: 'off' },
+      },
+    }),
+  );
+}
+
+describe('readings and labels beside devices', () => {
+  // sen1 is a sensor at (420, 150), 20 units across: its reading pill ("24 °C") runs from x 436 to
+  // about 505, centred on y 150 and 24 units high. Its middle is far outside the marker's own 22 px.
+  const PILL_MIDDLE = { x: 470, y: 150 };
+
+  it('I1: a tap on the reading pill operates the device, as a tap on the marker does', async () => {
+    const hass = sensorHass();
+    const view = await mountView({ hass, home: homeResponse({ links: SENSOR_LINKS }) });
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+    expect(group(view, 'sen1').querySelector('.pill text')?.textContent).toBe('24 °C');
+
+    const at = planPoint(view, PILL_MIDDLE.x, PILL_MIDDLE.y);
+    expect(Math.hypot(at.x - elementPoint(view, 'sen1').x, at.y - elementPoint(view, 'sen1').y)).toBeGreaterThan(30);
+    tap(stageOf(view), at.x, at.y);
+    await settle(view);
+
+    expect(seen).toEqual([{ entityId: 'sensor.temp' }]);
+    expect(picker(view)).toBeNull();
+  });
+
+  it('I1: holding the reading pill opens the details, and a release afterwards does not tap', async () => {
+    const view = await mountView({ hass: sensorHass(), home: homeResponse({ links: SENSOR_LINKS }) });
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+    const at = planPoint(view, PILL_MIDDLE.x, PILL_MIDDLE.y);
+    vi.useFakeTimers();
+
+    pointer(stageOf(view), 'pointerdown', at);
+    vi.advanceTimersByTime(600);
+    expect(seen).toEqual([{ entityId: 'sensor.temp' }]);
+    pointer(stageOf(view), 'pointerup', at);
+
+    expect(seen).toHaveLength(1);
+  });
+
+  it('I1: the pill stays tappable zoomed in, where the marker is far away', async () => {
+    const view = await mountView({ hass: sensorHass(), home: homeResponse({ links: SENSOR_LINKS }) });
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+    const c = elementPoint(view, 'sen1');
+    wheel(stageOf(view), -800, c.x, c.y);
+    await settle(view);
+
+    const at = planPoint(view, PILL_MIDDLE.x, PILL_MIDDLE.y);
+    tap(stageOf(view), at.x, at.y);
+
+    expect(seen).toEqual([{ entityId: 'sensor.temp' }]);
+  });
+
+  it('I1: just past the pill is still the empty drawing', async () => {
+    const view = await mountView({ hass: sensorHass(), home: homeResponse({ links: SENSOR_LINKS }) });
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+
+    // 30 units right of the pill's end and 40 units below it: nothing there.
+    const at = planPoint(view, 540, 190);
+    tap(stageOf(view), at.x, at.y);
+
+    expect(seen).toEqual([]);
+  });
+
+  it('I1: a tap on the end of a marker\'s label operates its device', async () => {
+    const hass = sensorHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ links: SENSOR_LINKS }) });
+
+    // "Entrance switch" is centred under sw1 at (180, 240) and about 87 units wide: this is its left end,
+    // well outside the marker's circle.
+    const at = planPoint(view, 180 - 38, 240);
+    expect(Math.hypot(at.x - elementPoint(view, 'sw1').x, at.y - elementPoint(view, 'sw1').y)).toBeGreaterThan(30);
+    tap(stageOf(view), at.x, at.y);
+    await settle(view);
+
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['switch.hall'] });
   });
 });
 

@@ -16,6 +16,9 @@ import type {
   HomeResponse,
   Link,
   SceneItem,
+  SceneLabel,
+  SceneMarker,
+  ScenePath,
 } from './types.ts';
 import { contentBox, layerOptions, placeInside, type Box, type Layer } from './view-geometry.ts';
 import { visualState, type VisualState } from './visual-state.ts';
@@ -35,6 +38,11 @@ const MAX_ZOOM = 6;
  * touch areas as they were, so devices that overlap at 1x can each be tapped once zoomed in.
  */
 const HIT_RADIUS_PX = 22;
+/** A reading pill or a text label can be hit this many CSS px beyond its box. */
+const TEXT_HIT_PX = 4;
+/** The reading pill and the labels are drawn in plan units; the touch areas follow the same boxes. */
+const PILL_FONT = 14;
+const LABEL_WIDTH_PER_CHAR = 0.58;
 const NOTICE_MS = 4000;
 /** The picker for overlapping devices: a fixed width, rows of 48 px (never under 44), and 4 px of padding. */
 const PICKER_WIDTH = 280;
@@ -63,6 +71,43 @@ const STATUS_TEXT: Record<VisualState['status'], string> = {
   alert: 'Alert',
   idle: 'Idle',
 };
+
+/** A box in plan units, from its top-left corner. */
+interface PlanBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Where an element's reading pill is drawn: to the right of a marker (to its left when that would
+ * leave the plan), centred above a line. The one place both the drawing and the touch areas ask.
+ */
+function pillBox(item: SceneMarker | ScenePath, text: string, planWidth: number): PlanBox {
+  const w = text.length * PILL_FONT * LABEL_WIDTH_PER_CHAR + PILL_FONT * 1.2;
+  const h = PILL_FONT * 1.7;
+  if (item.type === 'marker') {
+    let x = item.x + item.size / 2 + 6;
+    if (x + w > planWidth) x = item.x - item.size / 2 - 6 - w;
+    return { x, y: item.y - h / 2, w, h };
+  }
+  // Centred on the line, from its first point to its last.
+  const a = item.points[0];
+  const b = item.points[item.points.length - 1];
+  return { x: ((a?.x ?? 0) + (b?.x ?? 0)) / 2 - w / 2, y: ((a?.y ?? 0) + (b?.y ?? 0)) / 2 - h * 1.5, w, h };
+}
+
+/**
+ * Where a label's text is, roughly: centred on its position (a marker's label sits 0.3 of its height
+ * lower, see `markerNode`), as wide as its characters on average.
+ */
+function labelBox(item: SceneMarker | ScenePath, label: SceneLabel): PlanBox {
+  const w = label.text.length * label.fontSize * LABEL_WIDTH_PER_CHAR;
+  const h = label.fontSize * 1.3;
+  const cy = item.type === 'marker' ? label.y + label.fontSize * 0.3 : label.y;
+  return { x: label.x - w / 2, y: cy - h / 2, w, h };
+}
 
 /** Each view names its own soft-background filter: several cards can share one dashboard page. */
 let softFilterCount = 0;
@@ -354,8 +399,10 @@ export class MaxsenFloorplanView extends LitElement {
   /**
    * The touch areas of what is shown, in stage px: a circle round a marker and a stroke along a
    * line, each at least 22 px out from the item and never smaller than the item is drawn (so a
-   * large, zoomed-in marker can be tapped over its whole size). Topmost first, so that of two at the same distance the one drawn on top is listed first. Only
-   * the shown layers are here, and notes and unknown elements are not touchable.
+   * large, zoomed-in marker can be tapped over its whole size), and a box for each reading pill
+   * and text label beside it, which belong to the same element. Topmost first, so that of two at
+   * the same distance the one drawn on top is listed first. Only the shown layers are here, and
+   * notes and unknown elements are not touchable.
    */
   private _touchAreas(): HitItem[] {
     const { plans } = this._visible();
@@ -368,10 +415,23 @@ export class MaxsenFloorplanView extends LitElement {
     const v = this._view;
     const px = (x: number) => (offX + (x - box.x) * fit) * v.s + v.x;
     const py = (y: number) => (offY + (y - box.y) * fit) * v.s + v.y;
+    const textBox = (elementId: string, b: PlanBox): HitItem => ({
+      elementId,
+      x: px(b.x),
+      y: py(b.y),
+      w: b.w * fit * v.s,
+      h: b.h * fit * v.s,
+      hitRadius: TEXT_HIT_PX,
+    });
     const areas: HitItem[] = [];
     for (const plan of plans) {
       for (const item of plan.scene.items) {
         if (item.type === 'note' || !this._elements.has(item.elementId)) continue;
+        const reading = this._state(item.elementId).text;
+        if (reading && PILLED.has(item.categoryId)) {
+          areas.push(textBox(item.elementId, pillBox(item, reading, plan.width)));
+        }
+        if (item.label) areas.push(textBox(item.elementId, labelBox(item, item.label)));
         areas.push(
           item.type === 'marker'
             ? {
@@ -648,27 +708,12 @@ export class MaxsenFloorplanView extends LitElement {
   }
 
   private _renderPill(item: SceneItem, text: string, planWidth: number): SVGTemplateResult {
-    const fontSize = 14;
-    const w = text.length * fontSize * 0.58 + fontSize * 1.2;
-    const h = fontSize * 1.7;
-    let x: number;
-    let y: number;
-    if (item.type === 'marker') {
-      x = item.x + item.size / 2 + 6;
-      if (x + w > planWidth) x = item.x - item.size / 2 - 6 - w;
-      y = item.y;
-    } else if (item.type === 'path') {
-      // Centred on the line, from its first point to its last.
-      const a = item.points[0];
-      const b = item.points[item.points.length - 1];
-      x = ((a?.x ?? 0) + (b?.x ?? 0)) / 2 - w / 2;
-      y = ((a?.y ?? 0) + (b?.y ?? 0)) / 2 - h;
-    } else {
-      return svg``;
-    }
-    return svg`<g class="pill" transform="translate(${round(x)} ${round(y)})">
+    if (item.type === 'note') return svg``;
+    const { x, y, w, h } = pillBox(item, text, planWidth);
+    // The group sits on the pill's vertical centre, as the box's top edge is half a height above it.
+    return svg`<g class="pill" transform="translate(${round(x)} ${round(y + h / 2)})">
       <rect y=${-h / 2} width=${w} height=${h} rx=${h / 2} />
-      <text x=${w / 2} y="0" font-size=${fontSize} text-anchor="middle" dominant-baseline="central">${text}</text>
+      <text x=${w / 2} y="0" font-size=${PILL_FONT} text-anchor="middle" dominant-baseline="central">${text}</text>
     </g>`;
   }
 

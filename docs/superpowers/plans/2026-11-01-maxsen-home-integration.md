@@ -55,6 +55,7 @@ frontend/
   src/floorplan-view.ts, src/quick-panel.ts, src/link-mode.ts
   src/maxsen-home-panel.ts, src/maxsen-floorplan-card.ts
   test/*.test.ts
+  preview/             # run-on-your-Mac preview with a simulated Home Assistant (Task 8)
 tests/
   conftest.py, fixtures/home-v1.json (small valid package: 2 levels, 1×1 PNG images)
   test_package.py, test_config_flow.py, test_websocket.py, test_refresh.py, test_scene.py, test_init.py
@@ -230,7 +231,7 @@ tests/
   - Pinch-zoom and pan (pointer events). Double-tap resets.
   - In `use` mode: tap → toggle (`homeassistant.toggle` on the link's entities; covers: open/close toggle); press ≥ 500 ms → fire `hass-more-info` with the first entity; a device with more than one controllable entity → a popup with one row per entity. Unlinked/missing → no action.
   - In `link` mode: tap emits a `maxsen-element-tap` event `{elementId}`.
-- `<maxsen-home-panel>`: HA panel element (`hass`, `narrow`, `panel`). Finds the first `maxsen` config entry (or `panel.config.entry_id`), loads the home, subscribes, lays out the view plus the quick panel (Task 8): side by side when landscape and ≥ 900 px wide, stacked otherwise.
+- `<maxsen-home-panel>`: HA panel element (`hass`, `narrow`, `panel`). Finds the first `maxsen` config entry (or `panel.config.entry_id`), loads the home, subscribes, lays out the view plus the quick panel (Task 9): side by side when landscape and ≥ 900 px wide, stacked otherwise.
 - `<maxsen-floorplan-card>`: Lovelace card (`setConfig({entry_id?})`, `getCardSize() → 8`), rendering the same layout. Registered in `window.customCards`.
 
 - [ ] **Step 1: Write failing tests:**
@@ -241,7 +242,35 @@ tests/
 - [ ] **Step 4: Run** `npm test && npm run build && cd .. && pytest -v`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat: Maxsen Home panel and floor plan card` (including the built bundle)
 
-### Task 8: Quick-functions panel and installer tools
+### Task 8: Preview app (see the UI on a Mac without Home Assistant)
+
+Added at the owner's request: "an application I can run to see what is changing". It is also extended by Task 9 (the quick panel and link mode show up in it automatically, because it renders the real panel element).
+
+**Files:**
+- Create: `frontend/preview/index.html`, `frontend/preview/main.ts`, `frontend/preview/fake-hass.ts`
+- Modify: `frontend/package.json` (script `"preview": "vite --config vite.preview.config.ts"`), create `frontend/vite.preview.config.ts` (dev server port **5174**, so it doesn't clash with the planner's 5173)
+- Modify: `README.md` ("See it on your Mac" section)
+- Test: `frontend/test/fake-hass.test.ts`
+
+**Interfaces:**
+- `createFakeHass(home: HomeResponse, opts: { admin: boolean; installerMode: boolean }): FakeHass`. It is a `HassLike` object (states, entities, devices, areas, `user.is_admin`, `callService`, `callWS`, `fetchWithAuth`, `connection.subscribeMessage`) that:
+  - makes one fake device per non-lighting element (with entities matching its category: 1–3 `switch.*` gangs for smart switches, `cover.*` for curtains, `climate.*` for aircon, `binary_sensor.*` door/motion and `sensor.*` temperature for sensors), and one `switch.*` "gang" per 4 lighting elements on the same plan, auto-linked to them
+  - answers `maxsen/home`, `maxsen/links/set`, `maxsen/quick_panel/set`, `maxsen/scenes/create_starter`, `maxsen/refresh/preview|apply` in memory, with the same shapes as Tasks 3–5
+  - `homeassistant.toggle` / `turn_off` / `scene.turn_on` update states and notify subscribers; a door sensor flips every 20 s, so alerts can be seen
+  - `fetchWithAuth` serves background images from the loaded package's embedded base64
+- `preview/main.ts` page:
+  - toolbar: **Open home file…** (any `… home.json` downloaded from the planner, loading the real customer drawing), **Panel 1280×800 / Phone 390×844** frame switch, **Admin** and **Installer mode** toggles
+  - below it, the real `<maxsen-home-panel>` element fed by the fake hass
+  - starts with `tests/fixtures/home-v1.json`
+- Run with `cd frontend && npm install && npm run preview`, then open http://localhost:5174.
+
+- [ ] **Step 1: Write failing tests:** `createFakeHass` on the fixture creates a linked entity for every element; `callService('homeassistant','toggle',{entity_id})` flips the state and notifies a subscriber; `callWS({type:'maxsen/quick_panel/set', ...})` returns the new list; with `admin: false`, `maxsen/links/set` rejects with `not_allowed`.
+- [ ] **Step 2: Run** `cd frontend && npm test`. Expected: FAIL.
+- [ ] **Step 3: Implement** the fake hass, the preview page and the config. Add the README section.
+- [ ] **Step 4: Verify:** `npm test` passes, and `npm run preview` serves http://localhost:5174 with the floor plan visible. Check it with a headless browser screenshot (Playwright's preinstalled Chromium) and attach the screenshot to the report.
+- [ ] **Step 5: Commit** `feat(frontend): preview app with simulated Home Assistant`
+
+### Task 9: Quick-functions panel and installer tools
 
 **Files:**
 - Create: `frontend/src/quick-panel.ts`, `frontend/src/link-mode.ts`
@@ -259,7 +288,7 @@ tests/
 - [ ] **Step 4: Run** `npm test && npm run build && cd .. && pytest -v`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat: quick-functions panel and installer link mode` (with the built bundle)
 
-### Task 9: Install guide and release
+### Task 10: Install guide and release
 
 **Files:**
 - Create/replace: `README.md`

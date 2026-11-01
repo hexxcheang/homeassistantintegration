@@ -6,6 +6,7 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "build": "vite build",
+    "preview": "vite --config vite.preview.config.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

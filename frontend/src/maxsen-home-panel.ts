@@ -14,6 +14,18 @@ const NO_SELECTION: string[] = [];
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
 const RETRY_EVERY_MS = 30_000;
 
+/**
+ * Maxsen is not ready to answer yet (its entry is still loading, or its commands are not registered):
+ * Home Assistant is starting. Unlike other failures this is shown as a wait, not an error.
+ */
+class StillStarting extends Error {}
+
+/** A websocket error that means "no such Maxsen home or command (yet)". */
+function isNotReady(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : undefined;
+  return code === 'not_found' || code === 'unknown_command';
+}
+
 export function retryDelay(attempt: number): number {
   return RETRY_DELAYS_MS[attempt] ?? RETRY_EVERY_MS;
 }
@@ -33,7 +45,7 @@ export function layoutFor(width: number, height: number): PanelLayout {
   return width >= SIDE_BY_SIDE_MIN_WIDTH && width > height ? 'side' : 'stacked';
 }
 
-type Status = 'loading' | 'ready' | 'none' | 'error';
+type Status = 'loading' | 'starting' | 'ready' | 'none' | 'error';
 
 interface PanelInfo {
   config?: { entry_id?: string };
@@ -205,11 +217,13 @@ export class MaxsenHomePanel extends LitElement {
           return;
         }
         // Listed but not loaded: Maxsen is still starting. Try again rather than say it is missing.
-        if (entry.state !== 'loaded') throw new Error(`Maxsen is ${entry.state}`);
+        if (entry.state !== 'loaded') throw new StillStarting(`Maxsen is ${entry.state}`);
         entryId = entry.entryId;
       }
       this._entryId = entryId;
-      const home = await getHome(hass, entryId);
+      const home = await getHome(hass, entryId).catch((err: unknown) => {
+        throw isNotReady(err) ? new StillStarting('Maxsen is not answering yet') : err;
+      });
       if (run !== this._run) return;
       this._home = home;
       this._status = 'ready';
@@ -220,11 +234,14 @@ export class MaxsenHomePanel extends LitElement {
       }
       this._unsubscribe = unsubscribe;
       this._attempt = 0;
-    } catch {
+    } catch (err) {
       if (run !== this._run) return;
-      // A quiet retry keeps showing the home we have; otherwise say it could not be loaded. Either
-      // way try again by itself: right after a restart Maxsen may still be loading.
-      if (!quiet || !this._home) this._status = 'error';
+      // A quiet retry keeps showing the home we have; otherwise say it could not be loaded, or that
+      // Home Assistant is starting while the waits are still short (2, 5, 10 s). Either way try
+      // again by itself: right after a restart Maxsen may still be loading.
+      if (!quiet || !this._home) {
+        this._status = err instanceof StillStarting && this._attempt < RETRY_DELAYS_MS.length ? 'starting' : 'error';
+      }
       this._retryTimer = setTimeout(() => {
         this._retryTimer = undefined;
         if (run === this._run) this._resubscribe();
@@ -253,6 +270,8 @@ export class MaxsenHomePanel extends LitElement {
     switch (this._status) {
       case 'loading':
         return html`<div class="message">Loading…</div>`;
+      case 'starting':
+        return html`<div class="message">Home Assistant is starting…</div>`;
       case 'none':
         return html`<div class="message">
           Maxsen Home is not set up yet. Add it under Settings, Devices &amp; services.

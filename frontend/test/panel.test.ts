@@ -311,6 +311,10 @@ describe('<maxsen-home-panel> after Home Assistant restarts', () => {
     document.body.append(panel);
     await flush();
     expect(panel.shadowRoot!.textContent).not.toContain('not set up');
+    // It is starting, not broken: no error and no "Try again" while it retries by itself.
+    expect(panel.shadowRoot!.textContent).toContain('Home Assistant is starting…');
+    expect(panel.shadowRoot!.textContent).not.toContain('Could not load');
+    expect(panel.shadowRoot!.querySelector('button.retry')).toBeNull();
     expect(fake.subscribeCalls()).toBe(0);
 
     fake.setEntries([{ entry_id: 'e1', state: 'loaded' }]);
@@ -318,7 +322,64 @@ describe('<maxsen-home-panel> after Home Assistant restarts', () => {
     await flush();
 
     expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).not.toBeNull();
+    expect(panel.shadowRoot!.textContent).not.toContain('is starting');
     expect(fake.subscribeCalls()).toBe(1);
+  });
+
+  it('says it could not load the home once the retries have reached every 30 s, if Maxsen is still not up', async () => {
+    vi.useFakeTimers();
+    const fake = fakeHass([{ entry_id: 'e1', state: 'setup_in_progress' }]);
+    const panel = document.createElement('maxsen-home-panel') as MaxsenHomePanel;
+    panel.hass = fake.hass;
+    document.body.append(panel);
+    await flush();
+
+    // Tries at 0, 2, 7 and 17 s: the first three are the start-up wait.
+    for (const wait of [2_000, 5_000]) {
+      expect(panel.shadowRoot!.textContent).toContain('Home Assistant is starting…');
+      await vi.advanceTimersByTimeAsync(wait);
+      await flush();
+    }
+    expect(panel.shadowRoot!.textContent).toContain('Home Assistant is starting…');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flush();
+
+    expect(panel.shadowRoot!.textContent).toContain('Could not load the home');
+    expect(panel.shadowRoot!.textContent).not.toContain('is starting');
+    expect(panel.shadowRoot!.querySelector('button.retry')).not.toBeNull();
+    // It still retries, and heals once Maxsen is up.
+    fake.setEntries([{ entry_id: 'e1', state: 'loaded' }]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flush();
+    expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view')).not.toBeNull();
+  });
+
+  it('shows the starting message too when a configured home answers not_found or unknown_command', async () => {
+    for (const code of [NOT_FOUND, UNKNOWN_COMMAND]) {
+      vi.useFakeTimers();
+      const fake = fakeHass();
+      const answer = vi.mocked(fake.hass.callWS).getMockImplementation()!;
+      let up = false;
+      vi.mocked(fake.hass.callWS).mockImplementation((async (msg: { type: string }) => {
+        if (msg.type === 'maxsen/home' && !up) throw code;
+        return answer(msg);
+      }) as never);
+      const panel = document.createElement('maxsen-home-panel') as MaxsenHomePanel;
+      panel.hass = fake.hass;
+      panel.panel = { config: { entry_id: 'e1' } };
+      document.body.append(panel);
+      await flush();
+
+      expect(panel.shadowRoot!.textContent, code.code).toContain('Home Assistant is starting…');
+      expect(panel.shadowRoot!.textContent, code.code).not.toContain('Could not load');
+
+      up = true;
+      await vi.advanceTimersByTimeAsync(2_000);
+      await flush();
+      expect(panel.shadowRoot!.querySelector('maxsen-floorplan-view'), code.code).not.toBeNull();
+      panel.remove();
+      vi.useRealTimers();
+    }
   });
 
   it('stays on the home and retries while the entry is still loading after a reconnect', async () => {
@@ -467,7 +528,8 @@ describe('<maxsen-home-panel> after Home Assistant restarts', () => {
     panel.hass = fake.hass;
     document.body.append(panel);
     await flush();
-    expect(panel.shadowRoot!.textContent).toContain('Could not load the home');
+    expect(panel.shadowRoot!.textContent).toContain('Home Assistant is starting…');
+    expect(panel.shadowRoot!.textContent).not.toContain('Could not load');
 
     await vi.advanceTimersByTimeAsync(2_000);
     await flush();

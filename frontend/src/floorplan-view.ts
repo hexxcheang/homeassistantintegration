@@ -146,6 +146,12 @@ export class MaxsenFloorplanView extends LitElement {
 
   // ---- lifecycle ----
 
+  override connectedCallback(): void {
+    super.connectedCallback();
+    // Images are dropped on disconnect; an update on re-attach loads them again.
+    if (this.hasUpdated) this.requestUpdate();
+  }
+
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this._dropImages();
@@ -210,7 +216,8 @@ export class MaxsenFloorplanView extends LitElement {
 
   private _loadImages(): void {
     const { hass, home } = this;
-    if (!hass || !home?.package) return;
+    // A detached view must not start fetches it would only throw away.
+    if (!this.isConnected || !hass || !home?.package) return;
     for (const plan of this._visible().plans) {
       const id = plan.background.imageId;
       const url = home.image_urls[id];
@@ -564,7 +571,18 @@ export class MaxsenFloorplanView extends LitElement {
       class=${classMap({ element: true, [item.type]: true, [state.status]: true })}
       data-element-id=${id}
     >
-      ${item.type === 'marker' ? svg`<circle class="hit" cx=${item.x} cy=${item.y} r=${round(hitRadius)} fill="transparent" />` : nothing}
+      ${item.type === 'marker'
+        ? svg`<circle class="hit" cx=${item.x} cy=${item.y} r=${round(hitRadius)} fill="transparent" />`
+        : svg`<path
+            class="hit"
+            d=${item.d}
+            fill="none"
+            stroke="transparent"
+            stroke-width=${round(hitRadius * 2)}
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            pointer-events="stroke"
+          />`}
       ${state.status === 'alert' && item.type === 'marker'
         ? svg`<circle class="alert-ring" cx=${item.x} cy=${item.y} r=${Math.max(item.size * 0.9, 18)} />`
         : nothing}

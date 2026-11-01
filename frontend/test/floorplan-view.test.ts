@@ -102,6 +102,17 @@ describe('drawing', () => {
     expect(Number(hit?.getAttribute('r')) * 0.6).toBeGreaterThanOrEqual(22);
   });
 
+  it('gives lines (strips, curtains) a hit twin at least 44 CSS px wide', async () => {
+    const view = await mountView({ hass: withImages(), home: homeResponse() });
+    for (const id of ['led1', 'cur1']) {
+      const twin = group(view, id).querySelector('path.hit');
+      expect(twin, id).not.toBeNull();
+      expect(twin?.getAttribute('fill')).toBe('none');
+      // 600 px stage for 1000 plan units: 0.6 px per unit.
+      expect(Number(twin?.getAttribute('stroke-width')) * 0.6).toBeGreaterThanOrEqual(44 - 0.01);
+    }
+  });
+
   it('renders staff text only as text, never as markup', async () => {
     const nasty = '<script>alert(1)</script>&"';
     const edited = structuredClone(homeResponse());
@@ -276,6 +287,30 @@ describe('use mode', () => {
     expect(seen).toEqual([]);
   });
 
+  it('taps and holds on the hit twin of an LED strip act on the strip', async () => {
+    const hass = withImages();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({
+      hass,
+      home: homeResponse({ links: { led1: { type: 'entity', id: 'light.kitchen' } } }),
+    });
+    const twin = group(view, 'led1').querySelector('path.hit')!;
+    const seen: unknown[] = [];
+    view.addEventListener('hass-more-info', (e) => seen.push((e as CustomEvent).detail));
+
+    tap(twin);
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', {
+      entity_id: ['light.kitchen'],
+    });
+
+    vi.useFakeTimers();
+    pointer(twin, 'pointerdown');
+    vi.advanceTimersByTime(600);
+    pointer(twin, 'pointerup');
+    expect(seen).toEqual([{ entityId: 'light.kitchen' }]);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
   it('opens a popup with a row per entity for a device with several controls', async () => {
     const hass = withImages();
     const call = vi.spyOn(hass, 'callService');
@@ -304,6 +339,16 @@ describe('use mode', () => {
 });
 
 describe('link mode', () => {
+  it('emits maxsen-element-tap when the hit twin of a line is tapped', async () => {
+    const view = await mountView({ hass: withImages(), mode: 'link', home: homeResponse() });
+    const taps: unknown[] = [];
+    view.addEventListener('maxsen-element-tap', (e) => taps.push((e as CustomEvent).detail));
+
+    tap(group(view, 'cur1').querySelector('path.hit')!);
+
+    expect(taps).toEqual([{ elementId: 'cur1' }]);
+  });
+
   it('emits maxsen-element-tap for any element and calls no service', async () => {
     const hass = withImages();
     const call = vi.spyOn(hass, 'callService');
@@ -405,6 +450,22 @@ describe('images', () => {
 
     view.remove();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:image-1');
+  });
+
+  it('fetches nothing more when removed, and loads the background again when re-attached', async () => {
+    const hass = withImages();
+    const fetchWithAuth = vi.spyOn(hass, 'fetchWithAuth');
+    const view = await mountView({ hass, home: homeResponse() });
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+
+    view.remove();
+    await settle(view);
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+
+    document.body.append(view);
+    await settle(view);
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2);
+    expect(root(view).querySelector('image')?.getAttribute('href')).toMatch(/^blob:image-/);
   });
 
   it('revokes an image that arrives after the view was removed', async () => {

@@ -976,6 +976,9 @@ var Tt = class extends J {
 	constructor() {
 		super(), this.mode = "use", this._planType = "smart-home", this._images = /* @__PURE__ */ new Map(), this._stage = ht;
 	}
+	connectedCallback() {
+		super.connectedCallback(), this.hasUpdated && this.requestUpdate();
+	}
 	disconnectedCallback() {
 		super.disconnectedCallback(), this._dropImages(), this._cancelHold(), clearTimeout(this._noticeTimer), this._observer?.disconnect(), this._observer = void 0, this._observed = void 0, this._pointers.clear(), this._press = void 0, this._pinch = void 0;
 	}
@@ -1008,7 +1011,7 @@ var Tt = class extends J {
 	}
 	_loadImages() {
 		let { hass: e, home: t } = this;
-		if (e && t?.package) for (let n of this._visible().plans) {
+		if (this.isConnected && e && t?.package) for (let n of this._visible().plans) {
 			let r = n.background.imageId, i = t.image_urls[r];
 			if (!i || this._images.has(r) || this._loading.has(r)) continue;
 			this._loading.add(r);
@@ -1277,7 +1280,16 @@ var Tt = class extends J {
 		})}
       data-element-id=${i}
     >
-      ${e.type === "marker" ? z`<circle class="hit" cx=${e.x} cy=${e.y} r=${Z(r)} fill="transparent" />` : V}
+      ${e.type === "marker" ? z`<circle class="hit" cx=${e.x} cy=${e.y} r=${Z(r)} fill="transparent" />` : z`<path
+            class="hit"
+            d=${e.d}
+            fill="none"
+            stroke="transparent"
+            stroke-width=${Z(r * 2)}
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            pointer-events="stroke"
+          />`}
       ${o.status === "alert" && e.type === "marker" ? z`<circle class="alert-ring" cx=${e.x} cy=${e.y} r=${Math.max(e.size * .9, 18)} />` : V}
       <g class="glyph" filter=${X(s)}>${a}</g>
       ${c}

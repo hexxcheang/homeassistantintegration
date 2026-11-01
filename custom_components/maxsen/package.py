@@ -24,6 +24,8 @@ PackageReason = Literal[
 # Image ids become file names, so they must not be able to leave the folder.
 _SAFE_IMAGE_ID = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
 
+PLAN_TYPES = ("smart-home", "lighting")
+
 _EXTENSIONS = {
     "image/png": "png",
     "image/jpeg": "jpg",
@@ -40,6 +42,52 @@ class PackageError(Exception):
         self.reason = reason
 
 
+def _check(condition: bool) -> None:
+    if not condition:
+        raise PackageError("wrong_format")
+
+
+def _is_str(value: Any) -> bool:
+    return isinstance(value, str)
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_structure(pkg: dict) -> None:
+    """Check the fields the rest of the integration relies on (wrong_format if absent)."""
+    project = pkg.get("project")
+    _check(isinstance(project, dict))
+    _check(_is_str(project.get("id")) and _is_str(project.get("title")))
+
+    images = pkg.get("images")
+    _check(isinstance(images, dict))
+    for image_id, image in images.items():
+        _check(bool(_SAFE_IMAGE_ID.match(image_id)))
+        _check(isinstance(image, dict))
+        _check(_is_str(image.get("mediaType")) and _is_str(image.get("data")))
+
+    levels = pkg.get("levels")
+    _check(isinstance(levels, list))
+    for level in levels:
+        _check(isinstance(level, dict))
+        _check(_is_str(level.get("id")) and _is_str(level.get("name")))
+        plans = level.get("plans")
+        _check(isinstance(plans, list))
+        for plan in plans:
+            _check(isinstance(plan, dict))
+            _check(_is_str(plan.get("id")))
+            _check(plan.get("type") in PLAN_TYPES)
+            _check(_is_int(plan.get("revision")))
+            background = plan.get("background")
+            _check(isinstance(background, dict) and _is_str(background.get("imageId")))
+            elements = plan.get("elements")
+            _check(isinstance(elements, list))
+            for element in elements:
+                _check(isinstance(element, dict) and _is_str(element.get("id")))
+
+
 def parse_package(raw: bytes) -> dict:
     """Validate raw package bytes and return the package."""
     if len(raw) > MAX_PACKAGE_BYTES:
@@ -53,23 +101,12 @@ def parse_package(raw: bytes) -> dict:
     if pkg.get("schemaVersion") != PACKAGE_SCHEMA_VERSION:
         raise PackageError("unsupported_version")
 
-    try:
-        images = pkg["images"]
-        if not isinstance(images, dict):
-            raise PackageError("wrong_format")
-        for image_id, image in images.items():
-            if (
-                not _SAFE_IMAGE_ID.match(image_id)
-                or not isinstance(image["mediaType"], str)
-                or not isinstance(image["data"], str)
-            ):
-                raise PackageError("wrong_format")
-        for level in pkg["levels"]:
-            for plan in level["plans"]:
-                if plan["background"]["imageId"] not in images:
-                    raise PackageError("missing_image")
-    except (KeyError, TypeError) as err:
-        raise PackageError("wrong_format") from err
+    _validate_structure(pkg)
+    images = pkg["images"]
+    for level in pkg["levels"]:
+        for plan in level["plans"]:
+            if plan["background"]["imageId"] not in images:
+                raise PackageError("missing_image")
     return pkg
 
 

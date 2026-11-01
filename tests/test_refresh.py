@@ -471,6 +471,68 @@ async def test_overlapping_applies_never_delete_each_others_images(
     assert image_files(hass, entry) == expected
 
 
+async def test_edits_made_while_an_apply_is_saving_are_not_lost(
+    hass, hass_ws_client, hass_read_only_access_token, aioclient_mock, entry, home_package
+):
+    aioclient_mock.get(HOME_URL, json=changed_package(home_package))
+    admin_ws = await hass_ws_client()
+    user_ws = await hass_ws_client(hass, hass_read_only_access_token)
+    previewed = (await preview(admin_ws, entry))["result"]
+
+    from homeassistant.helpers.storage import Store
+
+    real_save = Store.async_save
+    reached, release = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def stalled_first_save(self, data):
+        calls.append(data)
+        if len(calls) == 1:  # the apply's own save
+            reached.set()
+            await release.wait()
+        return await real_save(self, data)
+
+    new_link = {"type": "device", "id": "dev-replaced"}
+    new_item = {"type": "entity", "id": "scene.movie_night"}
+    with patch.object(Store, "async_save", stalled_first_save):
+        await admin_ws.send_json_auto_id(
+            {
+                "type": "maxsen/refresh/apply",
+                "entry_id": entry.entry_id,
+                "preview_id": previewed["preview_id"],
+            }
+        )
+        await asyncio.wait_for(reached.wait(), 5)
+        await user_ws.send_json_auto_id(
+            {
+                "type": "maxsen/quick_panel/set",
+                "entry_id": entry.entry_id,
+                "items": [{"type": "element", "id": "sw1"}, new_item],
+            }
+        )
+        await admin_ws.send_json_auto_id(
+            {
+                "type": "maxsen/links/set",
+                "entry_id": entry.entry_id,
+                "updates": {"sw1": new_link},
+            }
+        )
+        await asyncio.sleep(0.1)  # let both edits run as far as they can
+        release.set()
+        results = [await admin_ws.receive_json(), await admin_ws.receive_json()]
+        results.append(await user_ws.receive_json())
+
+    assert all(r["success"] for r in results), results
+
+    reloaded = MaxsenStore(hass, entry.entry_id)
+    await reloaded.async_load()
+    for data in (entry.runtime_data.data, reloaded.data):
+        assert [level["id"] for level in data["package"]["levels"]] == ["level-1"]
+        assert data["links"]["sw1"] == new_link
+        assert "dl2" not in data["links"]  # still pruned by the apply
+        assert data["quick_panel"] == [{"type": "element", "id": "sw1"}, new_item]
+
+
 # ------------------------------------------------------- the preview lifetime
 
 

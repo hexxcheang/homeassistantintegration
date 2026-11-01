@@ -193,6 +193,8 @@ export class MaxsenFloorplanView extends LitElement {
   declare private _notice: string | undefined;
 
   private _elements = new Map<string, HomeElement>();
+  /** The picker row a pointer was last pressed on, until its click (or the picker closing). */
+  private _pickDown: string | undefined;
   private _packageKey = '';
   private _loading = new Set<string>();
   private _generation = 0;
@@ -617,6 +619,7 @@ export class MaxsenFloorplanView extends LitElement {
     const active = (this.renderRoot as ShadowRoot).activeElement;
     this._returnFocus = active instanceof HTMLElement ? active : undefined;
     this._picker = { x: press.x, y: press.y, ids, intent };
+    this._pickDown = undefined;
     window.addEventListener('keydown', this._onPickerKey);
   }
 
@@ -625,6 +628,7 @@ export class MaxsenFloorplanView extends LitElement {
     window.removeEventListener('keydown', this._onPickerKey);
     if (!this._picker) return;
     this._picker = undefined;
+    this._pickDown = undefined;
     const back = this._returnFocus;
     this._returnFocus = undefined;
     if (!restoreFocus) return;
@@ -635,6 +639,20 @@ export class MaxsenFloorplanView extends LitElement {
   private readonly _onPickerKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') this._closePicker();
   };
+
+  /**
+   * A row is chosen by a click, but only one whose press started on that row. The tap that opens the
+   * picker is followed, a moment later, by the browser's own click at the same spot, which can land
+   * on a row the picker has just drawn there: that click never saw a pointerdown on the row and
+   * must choose nothing. A click with no pointer behind it (`detail` 0: Enter or Space on a focused
+   * row, or assistive technology) is a deliberate choice and always counts.
+   */
+  private _onPickClick(e: MouseEvent, elementId: string): void {
+    const pressed = this._pickDown;
+    this._pickDown = undefined;
+    if (e.detail !== 0 && pressed !== elementId) return;
+    this._choose(elementId);
+  }
 
   private _choose(elementId: string): void {
     const intent = this._picker?.intent;
@@ -883,7 +901,8 @@ export class MaxsenFloorplanView extends LitElement {
               type="button"
               class=${classMap({ pick: true, dim: !choosable(state.status) })}
               aria-disabled=${choosable(state.status) ? 'false' : 'true'}
-              @click=${() => this._choose(id)}
+              @pointerdown=${() => (this._pickDown = id)}
+              @click=${(e: MouseEvent) => this._onPickClick(e, id)}
             >
               <span class="dot" style=${styleMap({ background: color })}></span>
               <span class="pick-name">${el.label || el.productName}</span>

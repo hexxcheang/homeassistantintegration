@@ -1214,6 +1214,7 @@ var dn = class extends U {
 		_notice: { state: !0 }
 	};
 	_elements = /* @__PURE__ */ new Map();
+	_pickDown;
 	_packageKey = "";
 	_loading = /* @__PURE__ */ new Set();
 	_generation = 0;
@@ -1500,17 +1501,21 @@ var dn = class extends U {
 			y: e.y,
 			ids: n,
 			intent: t
-		}, window.addEventListener("keydown", this._onPickerKey);
+		}, this._pickDown = void 0, window.addEventListener("keydown", this._onPickerKey);
 	}
 	_closePicker(e = !0) {
 		if (window.removeEventListener("keydown", this._onPickerKey), !this._picker) return;
-		this._picker = void 0;
+		this._picker = void 0, this._pickDown = void 0;
 		let t = this._returnFocus;
 		this._returnFocus = void 0, e && (t?.isConnected ? t : this.renderRoot.querySelector(".stage"))?.focus();
 	}
 	_onPickerKey = (e) => {
 		e.key === "Escape" && this._closePicker();
 	};
+	_onPickClick(e, t) {
+		let n = this._pickDown;
+		this._pickDown = void 0, (e.detail === 0 || n === t) && this._choose(t);
+	}
 	_choose(e) {
 		let t = this._picker?.intent;
 		this._closePicker(), t === "details" ? this._showDetails(e) : this._tapElement(e);
@@ -1711,7 +1716,8 @@ var dn = class extends U {
 			dim: !o(r.status)
 		})}
               aria-disabled=${o(r.status) ? "false" : "true"}
-              @click=${() => this._choose(e)}
+              @pointerdown=${() => this._pickDown = e}
+              @click=${(t) => this._onPickClick(t, e)}
             >
               <span class="dot" style=${bt({ background: n })}></span>
               <span class="pick-name">${t.label || t.productName}</span>

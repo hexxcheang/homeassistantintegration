@@ -975,6 +975,87 @@ describe('overlapping devices (the picker)', () => {
     expect(picker(view)).toBeNull();
   });
 
+  it('N1: the click that follows the tap that opened the picker, landing on a row, chooses nothing; a fresh press on a row does', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    // The real touch sequence: pointerdown/pointerup on the stage open the picker ...
+    tapElement(view, 'sw1');
+    await settle(view);
+    expect(picker(view)).not.toBeNull();
+    // ... then the browser delivers the tap's click, at the same spot, to whatever is there now: a row.
+    const ghost = new MouseEvent('click', { detail: 1, bubbles: true, composed: true, cancelable: true });
+    rowNamed(view, 'Lumi Cove Strip').dispatchEvent(ghost);
+    await settle(view);
+
+    expect(picker(view)).not.toBeNull();
+    expect(call).not.toHaveBeenCalled();
+
+    // A new press that starts on a row, then its click, is a choice.
+    const row = rowNamed(view, 'Lumi Cove Strip');
+    pointer(row, 'pointerdown');
+    pointer(row, 'pointerup');
+    row.dispatchEvent(new MouseEvent('click', { detail: 1, bubbles: true, composed: true, cancelable: true }));
+    await settle(view);
+
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['light.strip'] });
+    expect(picker(view)).toBeNull();
+  });
+
+  it('N1: a press that started on one row and clicks another chooses neither', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    pointer(rowNamed(view, 'Luna Downlight'), 'pointerdown');
+    rowNamed(view, 'Lumi Cove Strip').dispatchEvent(
+      new MouseEvent('click', { detail: 1, bubbles: true, composed: true, cancelable: true }),
+    );
+    await settle(view);
+
+    expect(call).not.toHaveBeenCalled();
+    expect(picker(view)).not.toBeNull();
+  });
+
+  it('N1: a stale press on a row does not carry over into the next picker', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    pointer(rowNamed(view, 'Lumi Cove Strip'), 'pointerdown');
+    key(window, 'Escape');
+    await settle(view);
+    tapElement(view, 'sw1');
+    await settle(view);
+    rowNamed(view, 'Lumi Cove Strip').dispatchEvent(
+      new MouseEvent('click', { detail: 1, bubbles: true, composed: true, cancelable: true }),
+    );
+    await settle(view);
+
+    expect(call).not.toHaveBeenCalled();
+    expect(picker(view)).not.toBeNull();
+  });
+
+  it('N1: the keyboard (a click with no pointer, detail 0) still chooses a row', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    rowNamed(view, 'Lumi Cove Strip').dispatchEvent(
+      new MouseEvent('click', { detail: 0, bubbles: true, composed: true, cancelable: true }),
+    );
+    await settle(view);
+
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['light.strip'] });
+  });
+
   it('Review Focus 4: a tap exactly between two touching switches lists both, and choosing one toggles only that one', async () => {
     const hass = clusterHass();
     const call = vi.spyOn(hass, 'callService');

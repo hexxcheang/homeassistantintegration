@@ -156,7 +156,7 @@ tests/
 **Interfaces:**
 - `maxsen/refresh/preview` → fetches with the stored token, parses, keeps the result in memory for 10 minutes under a `preview_id`, returns `{"preview_id", "added": [...], "removed": [...], "changed_drawings": [...]}` (element ids with `productName`/`label` for display). Admin + installer_mode.
 - `maxsen/refresh/apply` `{preview_id}` → saves images and package, drops links, quick-panel items and starter-scene members for removed element ids, then returns the same summary. Admin + installer_mode.
-- Errors: `revoked` (message "Connection revoked: ask Maxsen for a new pairing code"), `cannot_connect` ("Can't reach the planner"), `not_ready` (the planner's message), `invalid_package`, `preview_expired`. For `source: "file"` entries, preview takes `{file_id}` (an uploaded file) instead of fetching.
+- Errors: `revoked` (message "Connection revoked: ask Maxsen for a new pairing code"), `too_many` (planner answered 429: "The planner is busy. Try again in 15 minutes." Never treat it as revoked), `cannot_connect` ("Can't reach the planner"), `not_ready` (the planner's message), `invalid_package`, `preview_expired`. For `source: "file"` entries, preview takes `{file_id}` (an uploaded file) instead of fetching.
 
 - [ ] **Step 1: Write failing tests:**
   - **Review Focus 2:** the planner returns 401 → error `revoked`, and the stored package and links are unchanged; a timeout → `cannot_connect`, unchanged.

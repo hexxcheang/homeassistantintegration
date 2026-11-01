@@ -113,25 +113,20 @@ describe('drawing', () => {
     expect(group(view, 'dl1').querySelector('.alert-ring')).toBeNull();
   });
 
-  it('makes every marker at least 44 CSS px to hit', async () => {
-    const view = await mountView({ hass: withImages(), home: homeResponse() });
-    const hit = group(view, 'dl1').querySelector('circle.hit');
-    // The stage is 800 x 600 px in tests; the fitted box sets how many px a plan unit is.
-    const box = fittedBox(0);
-    const pxPerUnit = Math.min(800 / box.w, 600 / box.h);
-    expect(Number(hit?.getAttribute('r')) * pxPerUnit).toBeGreaterThanOrEqual(22 - 0.01);
+  it('makes every marker at least 44 CSS px to hit, and no wider than that at 1x', async () => {
+    const hass = withImages();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ links: { dl1: LIGHT } }) });
+
+    tapElement(view, 'dl1', 0, 21);
+    expect(call).toHaveBeenCalledTimes(1);
+    tapElement(view, 'dl1', 23, 0);
+    expect(call).toHaveBeenCalledTimes(1);
   });
 
-  it('gives lines (strips, curtains) a hit twin at least 44 CSS px wide', async () => {
+  it('draws no hit areas of its own: touch is resolved from the geometry', async () => {
     const view = await mountView({ hass: withImages(), home: homeResponse() });
-    for (const id of ['led1', 'cur1']) {
-      const twin = group(view, id).querySelector('path.hit');
-      expect(twin, id).not.toBeNull();
-      expect(twin?.getAttribute('fill')).toBe('none');
-      const box = fittedBox(0);
-      const pxPerUnit = Math.min(800 / box.w, 600 / box.h);
-      expect(Number(twin?.getAttribute('stroke-width')) * pxPerUnit).toBeGreaterThanOrEqual(44 - 0.01);
-    }
+    expect(root(view).querySelectorAll('.hit')).toHaveLength(0);
   });
 
   it('renders staff text only as text, never as markup', async () => {
@@ -558,7 +553,7 @@ describe('use mode', () => {
 });
 
 describe('link mode', () => {
-  it('emits maxsen-element-tap when the hit twin of a line is tapped', async () => {
+  it('emits maxsen-element-tap when a line is tapped', async () => {
     const view = await mountView({ hass: withImages(), mode: 'link', home: homeResponse() });
     const taps: unknown[] = [];
     view.addEventListener('maxsen-element-tap', (e) => taps.push((e as CustomEvent).detail));
@@ -1202,6 +1197,64 @@ describe('overlapping devices (the picker)', () => {
       expect(Math.abs(top - tapped.y), `${cx},${cy}`).toBeLessThan(height + 40);
       view.remove();
     }
+  });
+
+  it('zooming in separates devices that overlap at 1x: each is tapped at its own centre with no picker', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    // At 1x the switch and the downlight 12 units from it share their touch areas.
+    tapElement(view, 'sw1');
+    await settle(view);
+    expect(pickRows(view).length).toBeGreaterThanOrEqual(2);
+    key(window, 'Escape');
+    await settle(view);
+
+    const a = elementPoint(view, 'sw1');
+    wheel(stageOf(view), -800, a.x, a.y);
+    await settle(view);
+    expect(stageOf(view).querySelector<HTMLElement>('.canvas')!.style.transform).toMatch(/scale\((2|3)\./);
+
+    tapElement(view, 'sw1');
+    await settle(view);
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenLastCalledWith('homeassistant', 'toggle', { entity_id: ['switch.hall'] });
+    tapElement(view, 'dl1');
+    await settle(view);
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenLastCalledWith('homeassistant', 'toggle', { entity_id: ['light.kitchen'] });
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a zoomed-in marker tappable over its whole drawn size, beyond 22 px of its centre', async () => {
+    const hass = clusterHass();
+    const call = vi.spyOn(hass, 'callService');
+    const view = await mountView({ hass, home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+    buttonLabelled(view, 'Smart Home').click();
+    await settle(view);
+    const a = elementPoint(view, 'sw1');
+    wheel(stageOf(view), -3000, a.x, a.y);
+    await settle(view);
+
+    // At 6x the 20-unit marker is more than 100 px across: its edge is 40 px from the centre.
+    tapElement(view, 'sw1', 40, 0);
+    await settle(view);
+    expect(picker(view)).toBeNull();
+    expect(call).toHaveBeenCalledExactlyOnceWith('homeassistant', 'toggle', { entity_id: ['switch.hall'] });
+  });
+
+  it('opens the picker inside the drawing\'s own box, so the bar above it does not shift it', async () => {
+    const view = await mountView({ hass: clusterHass(), home: homeResponse({ package: clusterPackage(), links: CLUSTER_LINKS }) });
+
+    tapElement(view, 'sw1');
+    await settle(view);
+
+    // Stage-local coordinates only line up when the stage is the picker's containing block.
+    const stage = stageOf(view);
+    expect(root(view).querySelector('.picker-layer')?.parentElement).toBe(stage);
+    expect(picker(view)?.closest('.stage')).toBe(stage);
+    const css = (MaxsenFloorplanView.styles as unknown as { cssText: string }).cssText;
+    expect(/\.stage\s*\{[^}]*position:\s*relative/.test(css)).toBe(true);
   });
 
   it('finds the devices where they are on screen when the drawing is zoomed and panned', async () => {

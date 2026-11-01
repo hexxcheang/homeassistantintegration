@@ -29,7 +29,11 @@ const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_DISTANCE = 30;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
-/** Every marker can be hit within this many CSS px of its centre (44 px across) at default zoom. */
+/**
+ * Every marker and line can be hit within this many CSS px of it (44 px across), at any zoom. It
+ * is a size on the screen, not in the drawing: zooming in pulls neighbours apart and leaves their
+ * touch areas as they were, so devices that overlap at 1x can each be tapped once zoomed in.
+ */
 const HIT_RADIUS_PX = 22;
 const NOTICE_MS = 4000;
 /** The picker for overlapping devices: a fixed width, rows of 48 px (never under 44), and 4 px of padding. */
@@ -348,9 +352,9 @@ export class MaxsenFloorplanView extends LitElement {
   }
 
   /**
-   * The touch areas of what is shown, in stage px at the current zoom: a circle of 22 px around a
-   * marker and a 22 px half-width stroke along a line, the same areas the drawing lays over them.
-   * Topmost first, so that of two at the same distance the one drawn on top is listed first. Only
+   * The touch areas of what is shown, in stage px: a circle round a marker and a stroke along a
+   * line, each at least 22 px out from the item and never smaller than the item is drawn (so a
+   * large, zoomed-in marker can be tapped over its whole size). Topmost first, so that of two at the same distance the one drawn on top is listed first. Only
    * the shown layers are here, and notes and unknown elements are not touchable.
    */
   private _touchAreas(): HitItem[] {
@@ -364,19 +368,23 @@ export class MaxsenFloorplanView extends LitElement {
     const v = this._view;
     const px = (x: number) => (offX + (x - box.x) * fit) * v.s + v.x;
     const py = (y: number) => (offY + (y - box.y) * fit) * v.s + v.y;
-    const hitRadius = HIT_RADIUS_PX * v.s;
     const areas: HitItem[] = [];
     for (const plan of plans) {
       for (const item of plan.scene.items) {
         if (item.type === 'note' || !this._elements.has(item.elementId)) continue;
         areas.push(
           item.type === 'marker'
-            ? { elementId: item.elementId, x: px(item.x), y: py(item.y), hitRadius }
+            ? {
+                elementId: item.elementId,
+                x: px(item.x),
+                y: py(item.y),
+                hitRadius: Math.max(HIT_RADIUS_PX, (item.size / 2) * fit * v.s),
+              }
             : {
                 elementId: item.elementId,
                 points: item.points.map((pt) => ({ x: px(pt.x), y: py(pt.y) })),
                 closed: item.closed,
-                hitRadius,
+                hitRadius: Math.max(HIT_RADIUS_PX, (item.strokeWidth / 2) * fit * v.s),
               },
         );
       }
@@ -686,7 +694,7 @@ export class MaxsenFloorplanView extends LitElement {
     `;
   }
 
-  private _renderItem(item: SceneItem, node: SvgNode, plan: HomePlan, hitRadius: number): SVGTemplateResult {
+  private _renderItem(item: SceneItem, node: SvgNode, plan: HomePlan): SVGTemplateResult {
     const id = item.elementId;
     const children = (node.children ?? []).map((c) => this._renderNode(c));
     if (item.type === 'note' || !this._elements.has(id)) {
@@ -708,18 +716,6 @@ export class MaxsenFloorplanView extends LitElement {
       })}
       data-element-id=${id}
     >
-      ${item.type === 'marker'
-        ? svg`<circle class="hit" cx=${item.x} cy=${item.y} r=${round(hitRadius)} fill="transparent" />`
-        : svg`<path
-            class="hit"
-            d=${item.d}
-            fill="none"
-            stroke="transparent"
-            stroke-width=${round(hitRadius * 2)}
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            pointer-events="stroke"
-          />`}
       ${linking ? this._renderLinkMarks(item, state.status, selected) : nothing}
       ${state.status === 'alert' && item.type === 'marker'
         ? svg`<circle class="alert-ring" cx=${item.x} cy=${item.y} r=${Math.max(item.size * 0.9, 18)} />`
@@ -732,8 +728,6 @@ export class MaxsenFloorplanView extends LitElement {
   private _renderDrawing(plans: HomePlan[], box: Box): TemplateResult {
     const first = plans[0] as HomePlan;
     const image = this._images.get(first.background.imageId);
-    const fit = Math.min(this._stage.w / box.w, this._stage.h / box.h);
-    const hitRadius = HIT_RADIUS_PX / fit;
     const soft = this.home?.display?.background !== 'original';
     return html`
       <svg viewBox="${box.x} ${box.y} ${box.w} ${box.h}" preserveAspectRatio="xMidYMid meet">
@@ -772,14 +766,17 @@ export class MaxsenFloorplanView extends LitElement {
         ${plans.map((plan) => {
           const nodes = sceneNodes(plan);
           return svg`<g class="plan">${plan.scene.items.map((item, i) =>
-            this._renderItem(item, nodes[i] as SvgNode, plan, hitRadius),
+            this._renderItem(item, nodes[i] as SvgNode, plan),
           )}</g>`;
         })}
       </svg>
     `;
   }
 
-  /** The choice among devices that overlap at a tap, anchored to the tap and kept inside the drawing. */
+  /**
+   * The choice among devices that overlap at a tap, anchored to the tap and kept inside the drawing.
+   * It is drawn inside the stage, whose box the coordinates are in (the bar above it is not in them).
+   */
   private _renderPicker(): TemplateResult | typeof nothing {
     const picker = this._picker;
     if (!picker) return nothing;
@@ -940,8 +937,8 @@ export class MaxsenFloorplanView extends LitElement {
         <div class="canvas" style=${`transform: ${IDENTITY}`}>
           ${boxes ? this._renderDrawing(plans, boxes.shown) : html`<div class="empty">This level has no plan.</div>`}
         </div>
+        ${this._renderPicker()}
       </div>
-      ${this._renderPicker()}
       ${this._renderPopup()}
       ${this._notice ? html`<div class="notice" role="status">${this._notice}</div>` : nothing}
     `;

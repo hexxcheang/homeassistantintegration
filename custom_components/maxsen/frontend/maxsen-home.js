@@ -1328,12 +1328,12 @@ var on = class extends B {
 	_touchAreas() {
 		let { plans: e } = this._visible();
 		if (e.length === 0) return [];
-		let t = this._boxes(e).shown, n = this._stageSize(), r = Math.min(n.w / t.w, n.h / t.h), i = (n.w - t.w * r) / 2, a = (n.h - t.h * r) / 2, o = this._view, s = (e) => (i + (e - t.x) * r) * o.s + o.x, c = (e) => (a + (e - t.y) * r) * o.s + o.y, l = Ut * o.s, u = [];
-		for (let t of e) for (let e of t.scene.items) e.type !== "note" && this._elements.has(e.elementId) && u.push(e.type === "marker" ? {
+		let t = this._boxes(e).shown, n = this._stageSize(), r = Math.min(n.w / t.w, n.h / t.h), i = (n.w - t.w * r) / 2, a = (n.h - t.h * r) / 2, o = this._view, s = (e) => (i + (e - t.x) * r) * o.s + o.x, c = (e) => (a + (e - t.y) * r) * o.s + o.y, l = [];
+		for (let t of e) for (let e of t.scene.items) e.type !== "note" && this._elements.has(e.elementId) && l.push(e.type === "marker" ? {
 			elementId: e.elementId,
 			x: s(e.x),
 			y: c(e.y),
-			hitRadius: l
+			hitRadius: Math.max(Ut, e.size / 2 * r * o.s)
 		} : {
 			elementId: e.elementId,
 			points: e.points.map((e) => ({
@@ -1341,9 +1341,9 @@ var on = class extends B {
 				y: c(e.y)
 			})),
 			closed: e.closed,
-			hitRadius: l
+			hitRadius: Math.max(Ut, e.strokeWidth / 2 * r * o.s)
 		});
-		return u.reverse();
+		return l.reverse();
 	}
 	_onDown(e) {
 		let t = e.currentTarget, n = this._local(e);
@@ -1560,38 +1560,28 @@ var on = class extends B {
       ${r ? N`<path class=${i} d=${e.d} stroke-width=${e.strokeWidth + 8} />` : F}
     `;
 	}
-	_renderItem(e, t, n, r) {
-		let i = e.elementId, a = (t.children ?? []).map((e) => this._renderNode(e));
-		if (e.type === "note" || !this._elements.has(i)) return N`<g class="static" data-element-id=${i}>${a}</g>`;
-		let o = this._state(i), s = o.status === "on" && Xt.has(e.categoryId) ? e.type === "path" ? "url(#maxsen-glow-path)" : "url(#maxsen-glow)" : void 0, c = o.text && Zt.has(e.categoryId) ? this._renderPill(e, o.text, n.width) : F, l = this.mode === "link", u = l && this.selected.includes(i);
+	_renderItem(e, t, n) {
+		let r = e.elementId, i = (t.children ?? []).map((e) => this._renderNode(e));
+		if (e.type === "note" || !this._elements.has(r)) return N`<g class="static" data-element-id=${r}>${i}</g>`;
+		let a = this._state(r), o = a.status === "on" && Xt.has(e.categoryId) ? e.type === "path" ? "url(#maxsen-glow-path)" : "url(#maxsen-glow)" : void 0, s = a.text && Zt.has(e.categoryId) ? this._renderPill(e, a.text, n.width) : F, c = this.mode === "link", l = c && this.selected.includes(r);
 		return N`<g
       class=${U({
 			element: !0,
 			[e.type]: !0,
-			[o.status]: !0,
-			linking: l,
-			selected: u
+			[a.status]: !0,
+			linking: c,
+			selected: l
 		})}
-      data-element-id=${i}
+      data-element-id=${r}
     >
-      ${e.type === "marker" ? N`<circle class="hit" cx=${e.x} cy=${e.y} r=${J(r)} fill="transparent" />` : N`<path
-            class="hit"
-            d=${e.d}
-            fill="none"
-            stroke="transparent"
-            stroke-width=${J(r * 2)}
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            pointer-events="stroke"
-          />`}
-      ${l ? this._renderLinkMarks(e, o.status, u) : F}
-      ${o.status === "alert" && e.type === "marker" ? N`<circle class="alert-ring" cx=${e.x} cy=${e.y} r=${Math.max(e.size * .9, 18)} />` : F}
-      <g class="glyph" filter=${W(s)}>${a}</g>
-      ${c}
+      ${c ? this._renderLinkMarks(e, a.status, l) : F}
+      ${a.status === "alert" && e.type === "marker" ? N`<circle class="alert-ring" cx=${e.x} cy=${e.y} r=${Math.max(e.size * .9, 18)} />` : F}
+      <g class="glyph" filter=${W(o)}>${i}</g>
+      ${s}
     </g>`;
 	}
 	_renderDrawing(e, t) {
-		let n = e[0], r = this._images.get(n.background.imageId), i = Ut / Math.min(this._stage.w / t.w, this._stage.h / t.h), a = this.home?.display?.background !== "original";
+		let n = e[0], r = this._images.get(n.background.imageId), i = this.home?.display?.background !== "original";
 		return M`
       <svg viewBox="${t.x} ${t.y} ${t.w} ${t.h}" preserveAspectRatio="xMidYMid meet">
         <defs>
@@ -1619,17 +1609,17 @@ var on = class extends B {
         ${r ? N`<image
               class=${U({
 			background: !0,
-			soft: a
+			soft: i
 		})}
               href=${r}
-              filter=${W(a ? `url(#${this._softFilterId})` : void 0)}
+              filter=${W(i ? `url(#${this._softFilterId})` : void 0)}
               width=${n.width}
               height=${n.height}
               preserveAspectRatio="none"
             />` : F}
         ${e.map((e) => {
 			let t = an(e);
-			return N`<g class="plan">${e.scene.items.map((n, r) => this._renderItem(n, t[r], e, i))}</g>`;
+			return N`<g class="plan">${e.scene.items.map((n, r) => this._renderItem(n, t[r], e))}</g>`;
 		})}
       </svg>
     `;
@@ -1774,8 +1764,8 @@ var on = class extends B {
         <div class="canvas" style=${`transform: ${tn}`}>
           ${a ? this._renderDrawing(n, a.shown) : M`<div class="empty">This level has no plan.</div>`}
         </div>
+        ${this._renderPicker()}
       </div>
-      ${this._renderPicker()}
       ${this._renderPopup()}
       ${this._notice ? M`<div class="notice" role="status">${this._notice}</div>` : F}
     `;

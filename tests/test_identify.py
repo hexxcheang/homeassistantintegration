@@ -616,3 +616,17 @@ async def test_subscribing_after_unsubscribing_stops_nothing(
     await subscribe(ws, entry)
     await assert_nothing_pushed(ws)
 
+
+async def test_the_gang_count_does_not_apply_to_a_button_only_device(
+    hass, hass_ws_client, entry, freezer
+):
+    """A remote has no switch or light entity to count, so the walk's gang count must not hide it."""
+    remote = add_device(hass, "Remote", [("event", "remote_action")])
+    hass.states.async_set("event.remote_action", "unknown")
+    ws = await hass_ws_client()
+    await subscribe(ws, entry, gangs=2)
+
+    await flip(hass, "event.remote_action", "2026-11-02T10:00:00.000+00:00")
+    await window(hass, freezer)
+
+    assert (await ws.receive_json())["event"]["device_id"] == remote

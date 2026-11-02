@@ -217,10 +217,17 @@ class Identifier:
         return device is not None and self._is_zigbee(device)
 
     def _is_unlinked_match(self, device: dr.DeviceEntry) -> bool:
-        """Device mode: no device link yet, and the gang count (if asked) fits."""
+        """Device mode: no device link yet, and the gang count (if asked) fits.
+
+        A device with no switch or light at all (a button or remote) has no gangs
+        to count, so the gang count does not apply to it.
+        """
         if device.id in self._linked_device_ids():
             return False
-        return self._gangs is None or self._primary_gangs(device.id) == self._gangs
+        if self._gangs is None:
+            return True
+        gangs = self._primary_gangs(device.id)
+        return gangs == 0 or gangs == self._gangs
 
     def _is_zigbee(self, device: dr.DeviceEntry) -> bool:
         for entry_id in device.config_entries:

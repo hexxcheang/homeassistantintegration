@@ -203,6 +203,29 @@ describe('buildQueue', () => {
   });
 });
 
+describe('gang count from the variant name', () => {
+  it('reads 3 from the real fixture sw1 (product "Ark Series", variant "3-gang, White")', () => {
+    const sw1 = buildQueue(homeResponse()).find((s) => s.elementId === 'sw1');
+    expect(sw1).toMatchObject({ kind: 'device', gangs: 3 });
+  });
+
+  it('prefers the product name over the variant name', () => {
+    const q = buildQueue(
+      customHome([
+        {
+          name: 'L',
+          sortOrder: 1,
+          rows: [
+            { el: el('a', 'smart-switches', { productName: 'Ark 2 Gang', variantName: '3-gang' }), at: { x: 0, y: 0 } },
+            { el: el('b', 'smart-switches', { productName: 'Ark', variantName: 'White' }), at: { x: 1, y: 0 } },
+          ],
+        },
+      ]),
+    );
+    expect(q.map((s) => (s.kind === 'device' ? s.gangs : 'n/a'))).toEqual([2, null]);
+  });
+});
+
 describe('Walk', () => {
   const walk = () => new Walk(homeResponse());
 

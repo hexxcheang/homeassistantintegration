@@ -12,7 +12,7 @@ export type WalkStep =
       prompt: string;
       mode: 'device';
       kinds: IdentifyKind[];
-      /** Gang count stated in the product name of a switch; null when it states none. */
+      /** Gang count stated in the product or variant name of a switch; null when neither states one. */
       gangs: number | null;
     }
   | { kind: 'lights'; elementId: string; prompt: string; mode: 'entity'; kinds: ['light_gang'] }
@@ -23,8 +23,9 @@ const GANG_PATTERN = /(\d+)\s*-?\s*g(?:ang)?\b/i;
 
 const PICK_PROMPT = 'Pick it from the list';
 
-function gangCount(productName: string): number | null {
-  const match = GANG_PATTERN.exec(productName);
+/** The count the product name states, else the variant name ("Ark Series" + "3-gang, White"). */
+function gangCount(productName: string, variantName: string): number | null {
+  const match = GANG_PATTERN.exec(productName) ?? GANG_PATTERN.exec(variantName);
   return match ? Number(match[1]) : null;
 }
 
@@ -53,7 +54,7 @@ function stepFor(el: HomeElement): WalkStep {
         prompt: `Press any button on the switch at ${labelOf(el)}`,
         mode: 'device',
         kinds: ['switch'],
-        gangs: gangCount(el.productName),
+        gangs: gangCount(el.productName, el.variantName),
       };
     case 'curtains-blinds':
       return {

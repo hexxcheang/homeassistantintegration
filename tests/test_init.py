@@ -102,6 +102,7 @@ async def test_store_round_trip(hass):
     assert store.data == {
         "package": None,
         "links": {},
+        "named": {},
         "quick_panel": [],
         "scenes": [],
         "display": {"background": "soft"},

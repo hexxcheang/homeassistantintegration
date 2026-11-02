@@ -45,13 +45,25 @@ export function subscribe(
   );
 }
 
-/** Link or unlink elements; a `null` value removes that element's link. Installer mode only. */
+/**
+ * Link or unlink elements; a `null` value removes that element's link. Installer mode only.
+ *
+ * `nameDevice` names each linked device after its marker ("Level 1 – Entrance switch") and puts
+ * it in its level's area, unless a person named it. Unlinking a device Maxsen named puts its
+ * previous name and area back, with or without this option.
+ */
 export function setLinks(
   hass: HassLike,
   entryId: string,
   updates: Record<string, Link | null>,
+  options: { nameDevice?: boolean } = {},
 ): Promise<{ links: Record<string, Link> }> {
-  return hass.callWS({ type: 'maxsen/links/set', entry_id: entryId, updates });
+  return hass.callWS({
+    type: 'maxsen/links/set',
+    entry_id: entryId,
+    updates,
+    ...(options.nameDevice ? { name_device: true } : {}),
+  });
 }
 
 export function setQuickPanel(

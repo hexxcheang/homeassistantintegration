@@ -24,6 +24,9 @@ def _empty() -> dict[str, Any]:
     return {
         "package": None,
         "links": {},
+        # Devices Maxsen named, by device id: the name and area it wrote and the
+        # name_by_user and area_id it replaced.
+        "named": {},
         "quick_panel": [],
         "scenes": [],
         "display": {"background": "soft"},
@@ -49,6 +52,9 @@ class MaxsenStore:
         self.refresh_lock = asyncio.Lock()
         # Held by every change to ``data`` while it is built, saved and assigned.
         self._write_lock = asyncio.Lock()
+        # Held by a links change from planning the device names to the last
+        # registry update, so two of them never pick the same name.
+        self.link_lock = asyncio.Lock()
         # The one live refresh preview: (preview id, expiry, parsed package with
         # images). Memory only; a restart or a newer preview drops it.
         self._preview: tuple[str, datetime, dict[str, Any]] | None = None
@@ -94,8 +100,16 @@ class MaxsenStore:
         await self._async_write(lambda _: {"package": pkg})
         self._announce("home")
 
-    async def async_set_links(self, updates: dict[str, dict[str, str] | None]) -> None:
-        """Set links by element id; a ``None`` value removes that element's link."""
+    async def async_set_links(
+        self,
+        updates: dict[str, dict[str, str] | None],
+        named: dict[str, dict[str, Any] | None] | None = None,
+    ) -> None:
+        """Set links by element id; a ``None`` value removes that element's link.
+
+        ``named`` changes the records of devices Maxsen named in the same save:
+        a device id with a record sets it, with ``None`` drops it.
+        """
 
         def build(data: dict[str, Any]) -> dict[str, Any]:
             links = dict(data["links"])
@@ -104,7 +118,16 @@ class MaxsenStore:
                     links.pop(element_id, None)
                 else:
                     links[element_id] = link
-            return {"links": links}
+            changes: dict[str, Any] = {"links": links}
+            if named:
+                records = dict(data["named"])
+                for device_id, record in named.items():
+                    if record is None:
+                        records.pop(device_id, None)
+                    else:
+                        records[device_id] = record
+                changes["named"] = records
+            return changes
 
         await self._async_write(build)
         self._announce("links")

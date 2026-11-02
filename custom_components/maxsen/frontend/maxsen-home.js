@@ -337,11 +337,12 @@ function ve(e, t, n) {
 		entry_id: t
 	}, { resubscribe: !1 });
 }
-function ye(e, t, n) {
+function ye(e, t, n, r = {}) {
 	return e.callWS({
 		type: "maxsen/links/set",
 		entry_id: t,
-		updates: n
+		updates: n,
+		...r.nameDevice ? { name_device: !0 } : {}
 	});
 }
 function be(e, t, n) {

@@ -307,6 +307,56 @@ describe('createFakeHass: websocket', () => {
     ).rejects.toMatchObject({ code: 'invalid_element' });
   });
 
+  it('maxsen/links/set with name_device names and places a device, and unlinking puts it back', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const { id: deviceId } = (await getHome(fake)).links['sw1']!;
+    const before = { ...fake.devices[deviceId]! };
+    expect(before.name_by_user).toBeUndefined();
+
+    await ws(fake, { type: 'maxsen/links/set', updates: { sw1: null } });
+    await ws(fake, {
+      type: 'maxsen/links/set',
+      updates: { sw1: { type: 'device', id: deviceId } },
+      name_device: true,
+    });
+    const named = fake.devices[deviceId]!;
+    expect(named.name_by_user).toBe('Level 1 – Entrance switch');
+    expect(fake.areas[named.area_id!]!.name).toBe('Level 1');
+
+    await ws(fake, { type: 'maxsen/links/set', updates: { sw1: null } });
+    expect(fake.devices[deviceId]!.name_by_user ?? null).toBeNull();
+    expect(fake.devices[deviceId]!.area_id).toBe(before.area_id);
+  });
+
+  it('maxsen/links/set leaves a device a person named, numbers duplicates and skips entities', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const links = (await getHome(fake)).links;
+    const first = links['sw1']!.id;
+    const second = links['cur1']!.id;
+    fake.devices[first] = { ...fake.devices[first]!, name_by_user: 'Mum’s switch' };
+    const area = fake.devices[first]!.area_id;
+    await ws(fake, { type: 'maxsen/links/set', updates: { sw1: null, cur1: null } });
+    await ws(fake, {
+      type: 'maxsen/links/set',
+      updates: { sw1: { type: 'device', id: first }, cur1: { type: 'device', id: second } },
+      name_device: true,
+    });
+    expect(fake.devices[first]!.name_by_user).toBe('Mum’s switch');
+    expect(fake.devices[first]!.area_id).toBe(area);
+    expect(fake.devices[second]!.name_by_user).toBe('Level 1 – Smart Curtain Track');
+    await ws(fake, { type: 'maxsen/links/set', updates: { sw1: null } });
+    expect(fake.devices[first]!.name_by_user).toBe('Mum’s switch');
+
+    await ws(fake, {
+      type: 'maxsen/links/set',
+      updates: { dl1: { type: 'entity', id: 'light.entrance_switch_1' } },
+      name_device: true,
+    });
+    await expect(
+      ws(fake, { type: 'maxsen/links/set', updates: {}, name_device: 'yes' }),
+    ).rejects.toMatchObject({ code: 'invalid_format' });
+  });
+
   it('follows admin and installer mode changes live', async () => {
     const fake = createFakeHass(fresh(), { admin: true, installerMode: false });
     const events: string[] = [];

@@ -25,6 +25,7 @@ from .const import (
 from .entries import get_loaded_entry
 from .identify import KINDS as IDENTIFY_KINDS
 from .identify import Identifier
+from .naming import apply_changes, plan_for_links
 from .scene import async_create_starter_scenes, async_reload_scenes
 from .package import (
     PackageError,
@@ -146,6 +147,7 @@ def ws_home(
         vol.Required("type"): "maxsen/links/set",
         vol.Required("entry_id"): str,
         vol.Required("updates"): {_ID: _LINK},
+        vol.Optional("name_device", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -167,7 +169,37 @@ async def ws_links_set(
         )
         return
 
-    await store.async_set_links(msg["updates"])
+    updates = msg["updates"]
+    # Naming is planned, saved with the links, then written to the registry (which
+    # is Home Assistant's, not part of the store's transaction); a registry error
+    # puts the links and records back.
+    async with store.link_lock:
+        try:
+            plan = plan_for_links(
+                hass, store.data, updates, known, name_device=msg["name_device"]
+            )
+        except Exception:  # noqa: BLE001 - the registry is Home Assistant's
+            _LOGGER.warning("Could not plan the device names", exc_info=True)
+            connection.send_error(
+                msg["id"], "naming_failed", "Could not name the devices"
+            )
+            return
+        before_links = {
+            element_id: store.data["links"].get(element_id) for element_id in updates
+        }
+        before_named = {
+            device_id: store.data["named"].get(device_id) for device_id in plan.named
+        }
+        await store.async_set_links(updates, named=plan.named)
+        try:
+            apply_changes(hass, plan.changes)
+        except Exception:  # noqa: BLE001 - the registry is Home Assistant's
+            _LOGGER.warning("Could not name the devices", exc_info=True)
+            await store.async_set_links(before_links, named=before_named)
+            connection.send_error(
+                msg["id"], "naming_failed", "Could not name the devices"
+            )
+            return
     connection.send_result(msg["id"], {"links": store.data["links"]})
 
 

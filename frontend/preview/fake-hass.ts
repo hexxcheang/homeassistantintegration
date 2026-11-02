@@ -204,6 +204,23 @@ function ensureArea(world: World, name: string): string {
   return id;
 }
 
+/** What Maxsen wrote to a device, and what it replaced (the integration's `named` records). */
+interface NamedRecord {
+  name: string;
+  area_id: string | null;
+  prev_name: string | null;
+  prev_area_id: string | null;
+}
+
+/** "Level – label (else product name)", numbered 2, 3, ... when taken (ignoring case). */
+function installedName(levelName: string, el: HomeElement, taken: Set<string>): string {
+  const base = `${levelName} – ${el.label?.trim() || el.productName?.trim() || el.id}`;
+  const folded = new Set([...taken].map((n) => n.toLowerCase()));
+  let name = base;
+  for (let n = 2; folded.has(name.toLowerCase()); n++) name = `${base} ${n}`;
+  return name;
+}
+
 function uniqueDeviceName(world: World, wanted: string): string {
   const taken = new Set(Object.values(world.devices).map((d) => d.name));
   let name = wanted;
@@ -365,6 +382,8 @@ export function createFakeHass(
   let pkg = initial;
   let stored = strip(pkg);
   let links: Record<string, Link> = {};
+  /** Devices named by `links/set` with `name_device`, by device id. */
+  let named: Record<string, NamedRecord> = {};
   let quickPanel: QuickItem[] = [];
   let scenes: StarterScene[] = [];
   /** Scene entity id to the starter scene behind it. */
@@ -538,9 +557,64 @@ export function createFakeHass(
       if (link === null) delete next[id];
       else next[id] = link as Link;
     }
+    const nameDevice = msg['name_device'] ?? false;
+    if (typeof nameDevice !== 'boolean') {
+      throw new CommandError('invalid_format', 'name_device must be true or false');
+    }
+
+    // As the integration does: restore the devices no link points to any more,
+    // then (with name_device) name and place the devices linked now.
+    const world = draft();
+    const stillLinked = new Set(
+      Object.values(next).flatMap((l) => (l.type === 'device' ? [l.id] : [])),
+    );
+    const released = new Set<string>();
+    for (const id of Object.keys(updates)) {
+      const old = links[id];
+      if (old?.type === 'device' && !stillLinked.has(old.id)) released.add(old.id);
+    }
+    const nextNamed = { ...named };
+    for (const deviceId of released) {
+      const record = nextNamed[deviceId];
+      if (!record) continue;
+      delete nextNamed[deviceId];
+      const device = world.devices[deviceId];
+      if (!device) continue;
+      world.devices[deviceId] = {
+        ...device,
+        ...(device.name_by_user === record.name ? { name_by_user: record.prev_name } : {}),
+        ...((device.area_id ?? null) === record.area_id ? { area_id: record.prev_area_id } : {}),
+      };
+    }
+    if (nameDevice) {
+      const taken = new Set(
+        Object.values(world.devices).flatMap((d) => (d.name_by_user ? [d.name_by_user] : [])),
+      );
+      const done = new Set<string>();
+      for (const [id, link] of Object.entries(updates)) {
+        const target = link as Link | null;
+        const device = target?.type === 'device' ? world.devices[target.id] : undefined;
+        if (!target || !device || done.has(target.id) || device.name_by_user) continue;
+        done.add(target.id);
+        const level = pkg.levels.find((l) => l.plans.some((p) => p.elements.some((e) => e.id === id)));
+        const element = known.get(id);
+        if (!level || !element) continue;
+        const name = installedName(level.name, element, taken);
+        taken.add(name);
+        const placed = device.area_id ?? ensureArea(world, level.name);
+        world.devices[target.id] = { ...device, name_by_user: name, area_id: placed };
+        nextNamed[target.id] = {
+          name,
+          area_id: placed,
+          prev_name: device.name_by_user ?? null,
+          prev_area_id: device.area_id ?? null,
+        };
+      }
+    }
     links = next;
+    named = nextNamed;
+    commit(world);
     emit('links');
-    for (const listener of [...listeners]) listener();
     return { links: structuredClone(links) };
   }
 
@@ -802,6 +876,7 @@ export function createFakeHass(
       plannerPackage = next;
       revoked = false;
       links = nextLinks;
+      named = {};
       quickPanel = [];
       display = { background: 'soft' };
       scenes = [];

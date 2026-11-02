@@ -58,6 +58,22 @@ export interface FakeHass extends HassLike {
   restart(startingMs?: number): void;
   /** Flip the door sensors every 20 s so alerts can be seen. Returns the stop function. */
   startSimulation(everyMs?: number): () => void;
+  /** What a person can press on the fake devices: their gangs, curtains and sensors, not their settings. */
+  pressTargets(): PressTarget[];
+  /**
+   * Press this entity as a person would: a switch, light or sensor goes to its other state, a
+   * curtain opens or closes. `maxsen/identify/subscribe` listeners see it like a real state change.
+   */
+  press(entityId: string): void;
+}
+
+/** One entry of the preview's Press a device menu. */
+export interface PressTarget {
+  entityId: string;
+  /** The entity's name, e.g. "Entrance switch 2". */
+  label: string;
+  /** The device it belongs to, to group the menu. */
+  group: string;
 }
 
 /** What the panel says for a rejected refresh file: the same sentences as the integration's `websocket.py`. */
@@ -94,6 +110,27 @@ interface Preview {
 }
 
 type Message = { type: string; [key: string]: unknown };
+
+const IDENTIFY_KINDS = ['switch', 'cover', 'binary_sensor', 'light_gang'];
+/** The entities of a device that count as its gangs. */
+const GANG_DOMAINS = new Set(['switch', 'light']);
+/** How long the first candidate waits for another before it is reported (identify.py `AMBIGUITY_WINDOW`). */
+const AMBIGUITY_WINDOW_MS = 1000;
+
+/** One `maxsen/identify/subscribe`: what it listens for, and the candidates inside its window. */
+interface Identify {
+  mode: 'device' | 'entity';
+  kinds: string[];
+  gangs: number | null;
+  includeOther: boolean;
+  send(result: Record<string, unknown>): void;
+  candidates: Map<string, Record<string, unknown>>;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** As the connection keeps it: false when the caller asked not to be resubscribed after a restart. */
+  resubscribe: boolean;
+  /** Dropped with a lost connection: ending it answers `not_found`. */
+  lost: boolean;
+}
 type Attributes = Record<string, unknown>;
 
 /** The four registries, copied before a batch of changes and put back in one go. */
@@ -322,15 +359,29 @@ function provision(
 function addLightingGang(world: World, level: HomeLevel, areaId: string): Link {
   let n = 1;
   while (world.states[`switch.${slug(level.name)}_lighting_${n}`]) n++;
+  // The gang is a switch of a (Zigbee) lighting module, as in a real home.
+  const deviceId = `device_lighting_${slug(level.name)}_${n}`;
+  world.devices[deviceId] = { id: deviceId, name: `${level.name} lighting module ${n}`, area_id: areaId };
   const id = addEntity(
     world,
     `switch.${slug(level.name)}_lighting_${n}`,
     `${level.name} lighting ${n}`,
     n % 2 === 1 ? 'on' : 'off',
     {},
-    { areaId },
+    { deviceId, areaId },
   );
   return { type: 'entity', id };
+}
+
+/**
+ * A device no marker links to and that is not Zigbee (a Wi-Fi plug), to show that pressing it does
+ * not count unless "Include other devices" is on. Returns its device id.
+ */
+function addWifiPlug(world: World): string {
+  const deviceId = 'device_wifi_plug';
+  world.devices[deviceId] = { id: deviceId, name: 'Hallway smart plug' };
+  addEntity(world, 'switch.hallway_smart_plug', 'Hallway smart plug', 'on', {}, { deviceId });
+  return deviceId;
 }
 
 // ---- starter scenes ----
@@ -405,6 +456,10 @@ export function createFakeHass(
     resubscribe: boolean;
   }
   const subscribers = new Set<Subscription>();
+  /** The devices that are not Zigbee (every other fake device is, as the integration counts it). */
+  let nonZigbee = new Set<string>();
+  /** The open `maxsen/identify/subscribe` calls. */
+  const identifiers = new Set<Identify>();
   const readyListeners = new Set<() => void>();
   /** Until this time (ms) the maxsen commands are not registered yet, as right after a restart. */
   let startingUntil = 0;
@@ -508,6 +563,159 @@ export function createFakeHass(
     }
     commit(world);
     return undefined;
+  }
+
+  // ---- press to identify (custom_components/maxsen/identify.py) ----
+
+  const isPrimary = (e: HassEntity): boolean => !e.entity_category && !e.hidden;
+
+  /** Whether this change is a press for `kind`: a light press is off to on; the rest are any change. */
+  function isPressFor(kind: string, domain: string, old: string, now: string): boolean {
+    if (old === now) return false;
+    if (kind === 'light_gang') return GANG_DOMAINS.has(domain) && old === 'off' && now === 'on';
+    if (kind === 'switch') return GANG_DOMAINS.has(domain);
+    return domain === kind; // 'cover' and 'binary_sensor'
+  }
+
+  function primaryGangs(deviceId: string): number {
+    return Object.values(fake.entities).filter(
+      (e) => e.device_id === deviceId && GANG_DOMAINS.has(domainOf(e.entity_id)) && isPrimary(e),
+    ).length;
+  }
+
+  const deviceIsLinked = (deviceId: string): boolean =>
+    Object.values(links).some((l) => l.type === 'device' && l.id === deviceId);
+
+  function stopIdentify(sub: Identify): void {
+    clearTimeout(sub.timer);
+    sub.timer = undefined;
+    sub.candidates.clear();
+    identifiers.delete(sub);
+  }
+
+  function reportIdentify(sub: Identify): void {
+    sub.timer = undefined;
+    const found = [...sub.candidates.values()];
+    sub.candidates.clear();
+    if (found.length === 1) sub.send(found[0] as Record<string, unknown>);
+    else if (found.length > 1) sub.send({ ambiguous: true });
+  }
+
+  /** Takes `entityId` changing from `old` to `now` as a candidate of `sub`, if it is a press `sub` is waiting for. */
+  function noticePress(sub: Identify, entityId: string, old: string, now: string): void {
+    const domain = domainOf(entityId);
+    if (!sub.kinds.some((kind) => isPressFor(kind, domain, old, now))) return;
+    const entity = fake.entities[entityId];
+    if (!entity || !isPrimary(entity)) return;
+    const device = entity.device_id ? fake.devices[entity.device_id] : undefined;
+    if (!sub.includeOther && !(device && !nonZigbee.has(device.id))) return;
+
+    let key: string;
+    let result: Record<string, unknown>;
+    if (sub.mode === 'entity') {
+      // A gang that is already linked may be chosen again for more lights.
+      key = entityId;
+      const friendly = fake.states[entityId]?.attributes['friendly_name'];
+      result = { entity_id: entityId, name: typeof friendly === 'string' ? friendly : entityId };
+    } else {
+      if (!device || deviceIsLinked(device.id)) return;
+      if (sub.gangs !== null && primaryGangs(device.id) !== sub.gangs) return;
+      key = device.id;
+      result = { device_id: device.id, name: device.name_by_user || device.name || device.id };
+    }
+    // The same thing pressed twice inside the window is still one candidate.
+    if (!sub.candidates.has(key)) sub.candidates.set(key, result);
+    sub.timer ??= setTimeout(() => reportIdentify(sub), AMBIGUITY_WINDOW_MS);
+  }
+
+  function pressedState(entityId: string, state: string): { state: string; attributes?: Attributes } | undefined {
+    switch (domainOf(entityId)) {
+      case 'switch':
+      case 'light':
+      case 'binary_sensor':
+        return { state: state === 'on' ? 'off' : 'on' };
+      case 'cover': {
+        const open = state === 'closed';
+        return { state: open ? 'open' : 'closed', attributes: { current_position: open ? 100 : 0 } };
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  function press(entityId: string): void {
+    const old = fake.states[entityId];
+    const next = old && pressedState(entityId, old.state);
+    if (!old || !next) return;
+    const world = draft();
+    setStates(world, entityId, next.state, next.attributes);
+    commit(world);
+    for (const sub of [...identifiers]) noticePress(sub, entityId, old.state, next.state);
+  }
+
+  function pressTargets(): PressTarget[] {
+    const targets: PressTarget[] = [];
+    for (const entity of Object.values(fake.entities)) {
+      const id = entity.entity_id;
+      if (!['switch', 'light', 'cover', 'binary_sensor'].includes(domainOf(id)) || !isPrimary(entity)) continue;
+      const state = fake.states[id];
+      if (!state) continue;
+      const device = entity.device_id ? fake.devices[entity.device_id] : undefined;
+      const friendly = state.attributes['friendly_name'];
+      targets.push({
+        entityId: id,
+        label: typeof friendly === 'string' ? friendly : id,
+        group: device
+          ? `${device.name_by_user || device.name || device.id}${nonZigbee.has(device.id) ? ' (not Zigbee)' : ''}`
+          : 'Other',
+      });
+    }
+    return targets;
+  }
+
+  /** The schema of the server command: a bad request is `invalid_format`, before anything else is looked at. */
+  function parseIdentify(message: Message): Pick<Identify, 'mode' | 'kinds' | 'gangs' | 'includeOther'> {
+    const { mode, kinds, gangs, include_other: includeOther = false } = message;
+    const bad = (what: string): never => {
+      throw new CommandError('invalid_format', what);
+    };
+    if (mode !== 'device' && mode !== 'entity') bad('mode must be "device" or "entity"');
+    if (!Array.isArray(kinds) || !kinds.every((k) => typeof k === 'string' && IDENTIFY_KINDS.includes(k))) {
+      bad('kinds must be a list of switch, cover, binary_sensor or light_gang');
+    }
+    if (gangs !== undefined && !(typeof gangs === 'number' && Number.isInteger(gangs) && gangs >= 1)) {
+      bad('gangs must be a whole number of at least 1');
+    }
+    if (typeof includeOther !== 'boolean') bad('include_other must be true or false');
+    return {
+      mode: mode as 'device' | 'entity',
+      kinds: kinds as string[],
+      gangs: typeof gangs === 'number' ? gangs : null,
+      includeOther: includeOther as boolean,
+    };
+  }
+
+  function subscribeIdentify<T>(
+    callback: (message: T) => void,
+    message: Message,
+    options?: { resubscribe?: boolean },
+  ): () => Promise<void> {
+    const wanted = parseIdentify(message);
+    requireHome(message);
+    requireInstaller('Identifying');
+    const sub: Identify = {
+      ...wanted,
+      send: (result) => callback(result as T),
+      candidates: new Map(),
+      timer: undefined,
+      resubscribe: options?.resubscribe !== false,
+      lost: false,
+    };
+    identifiers.add(sub);
+    return async () => {
+      if (sub.lost) throw new CommandError('not_found', 'Subscription not found.');
+      stopIdentify(sub);
+    };
   }
 
   // ---- websocket ----
@@ -832,6 +1040,10 @@ export function createFakeHass(
         message: { type: string; [key: string]: unknown },
         options?: { resubscribe?: boolean },
       ): Promise<() => Promise<void>> {
+        if (message.type === 'maxsen/identify/subscribe') {
+          requireStarted(message.type);
+          return subscribeIdentify(callback, message, options);
+        }
         if (message.type !== 'maxsen/subscribe') {
           throw new CommandError('unknown_command', `Unknown command ${message.type}`);
         }
@@ -875,6 +1087,13 @@ export function createFakeHass(
     },
     setInstallerMode(on) {
       installerMode = on;
+      if (!on) {
+        // Identify ends itself, telling the client once (identify.py `_check_allowed`).
+        for (const sub of [...identifiers]) {
+          sub.send({ stopped: true });
+          stopIdentify(sub);
+        }
+      }
       emit('home');
       for (const listener of [...listeners]) listener();
     },
@@ -883,12 +1102,19 @@ export function createFakeHass(
       const nextStored = strip(next);
       const world: World = { states: {}, entities: {}, devices: {}, areas: {} };
       const nextLinks = provision(world, next, () => true);
+      const nextNonZigbee = new Set([addWifiPlug(world)]);
       pkg = next;
       stored = nextStored;
       source = 'file';
       plannerPackage = next;
       revoked = false;
       links = nextLinks;
+      nonZigbee = nextNonZigbee;
+      // The home these prompts were about is gone, as when the integration unloads.
+      for (const sub of [...identifiers]) {
+        sub.send({ stopped: true });
+        stopIdentify(sub);
+      }
       named = {};
       quickPanel = [];
       display = { background: 'soft' };
@@ -914,9 +1140,16 @@ export function createFakeHass(
       for (const subscriber of [...subscribers]) {
         if (!subscriber.resubscribe) subscribers.delete(subscriber);
       }
+      for (const sub of [...identifiers]) {
+        if (sub.resubscribe) continue;
+        sub.lost = true;
+        stopIdentify(sub);
+      }
       startingUntil = Date.now() + startingMs;
       for (const listener of [...readyListeners]) listener();
     },
+    pressTargets,
+    press,
     startSimulation(everyMs = DOOR_FLIP_MS) {
       const timer = setInterval(() => {
         const world = draft();
@@ -934,6 +1167,7 @@ export function createFakeHass(
   // The first home: the fake world and its automatic links.
   const world = draft();
   links = provision(world, pkg, () => true);
+  nonZigbee.add(addWifiPlug(world));
   commit(world);
   return fake;
 }

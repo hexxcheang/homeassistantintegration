@@ -38,3 +38,12 @@ export function linkName(link: Link, hass: HassLike): string | undefined {
   const device = hass.devices[link.id];
   return device ? device.name_by_user || device.name || link.id : undefined;
 }
+
+/** End a subscription without caring whether it still exists (after a reconnect or a stop it may not). */
+export function release(unsubscribe: (() => void | Promise<void>) | undefined): void {
+  try {
+    void Promise.resolve(unsubscribe?.()).catch(() => undefined);
+  } catch {
+    // Already gone.
+  }
+}

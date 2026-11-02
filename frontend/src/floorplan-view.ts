@@ -165,6 +165,7 @@ export class MaxsenFloorplanView extends LitElement {
     home: { attribute: false },
     mode: { type: String },
     selected: { attribute: false },
+    current: { type: String },
     _levelId: { state: true },
     _layer: { state: true },
     _whole: { state: true },
@@ -180,6 +181,8 @@ export class MaxsenFloorplanView extends LitElement {
   declare mode: ViewMode;
   /** Element ids to outline in link mode. */
   declare selected: readonly string[];
+  /** The element the installer is asked about (the linking walk's step): pulsing, and its level and layer are shown. */
+  declare current: string | undefined;
   declare private _levelId: string | undefined;
   /** The layer picked on the toggle; a level that cannot show it falls back to its first option. */
   declare private _layer: Layer;
@@ -217,6 +220,7 @@ export class MaxsenFloorplanView extends LitElement {
     super();
     this.mode = 'use';
     this.selected = [];
+    this.current = undefined;
     this._layer = 'all';
     this._whole = false;
     this._images = new Map();
@@ -246,7 +250,26 @@ export class MaxsenFloorplanView extends LitElement {
   }
 
   override willUpdate(changed: Map<PropertyKey, unknown>): void {
-    if (!changed.has('home')) return;
+    if (changed.has('home')) this._onHome();
+    // Only a new current element moves the view: the installer may look at another level meanwhile.
+    if (changed.has('current') && this.current) this._reveal(this.current);
+  }
+
+  /** Show the level of this element, and the layer it is on if the chosen one hides it. */
+  private _reveal(elementId: string): void {
+    for (const level of this._levels()) {
+      const plan = level.plans.find((p) => p.elements.some((e) => e.id === elementId));
+      if (!plan) continue;
+      if (this._levelId !== level.id) {
+        this._closePicker();
+        this._levelId = level.id;
+      }
+      if (this._layer !== 'all' && this._layer !== plan.type) this._layer = 'all';
+      return;
+    }
+  }
+
+  private _onHome(): void {
     const pkg = this.home?.package;
     const key = pkg ? `${pkg.project.id}|${pkg.exportedAt}|${pkg.savedVersion}` : '';
     if (key !== this._packageKey) {
@@ -775,6 +798,16 @@ export class MaxsenFloorplanView extends LitElement {
     `;
   }
 
+  /** The pulsing ring round the element the installer is asked about. */
+  private _renderCurrentRing(item: SceneItem): SVGTemplateResult {
+    if (item.type === 'note') return svg``;
+    if (item.type === 'marker') {
+      const r = Math.max(item.size * 0.85, 20);
+      return svg`<circle class="current-ring" cx=${item.x} cy=${item.y} r=${round(r + 10)} />`;
+    }
+    return svg`<path class="current-ring" d=${item.d} stroke-width=${item.strokeWidth + 20} />`;
+  }
+
   private _renderItem(item: SceneItem, node: SvgNode, plan: HomePlan): SVGTemplateResult {
     const id = item.elementId;
     const children = (node.children ?? []).map((c) => this._renderNode(c));
@@ -787,6 +820,7 @@ export class MaxsenFloorplanView extends LitElement {
     const pill = state.text && PILLED.has(item.categoryId) ? this._renderPill(item, state.text, plan.width) : nothing;
     const linking = this.mode === 'link';
     const selected = linking && this.selected.includes(id);
+    const current = this.current === id;
     return svg`<g
       class=${classMap({
         element: true,
@@ -794,10 +828,12 @@ export class MaxsenFloorplanView extends LitElement {
         [state.status]: true,
         linking,
         selected,
+        current,
       })}
       data-element-id=${id}
     >
       ${linking ? this._renderLinkMarks(item, state.status, selected) : nothing}
+      ${current ? this._renderCurrentRing(item) : nothing}
       ${state.status === 'alert' && item.type === 'marker'
         ? svg`<circle class="alert-ring" cx=${item.x} cy=${item.y} r=${Math.max(item.size * 0.9, 18)} />`
         : nothing}
@@ -1193,8 +1229,45 @@ export class MaxsenFloorplanView extends LitElement {
         opacity: 0;
       }
     }
+    .current-ring {
+      fill: none;
+      stroke: var(--primary-color, #2f6fed);
+      stroke-width: 7;
+      pointer-events: none;
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: maxsen-current 1.2s ease-in-out infinite;
+    }
+    /* A line is drawn wide, so it only fades: scaling would move it off its path. */
+    path.current-ring {
+      stroke: color-mix(in srgb, var(--primary-color, #2f6fed) 60%, transparent);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      animation-name: maxsen-current-line;
+    }
+    @keyframes maxsen-current {
+      0%,
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      50% {
+        transform: scale(1.15);
+        opacity: 0.4;
+      }
+    }
+    @keyframes maxsen-current-line {
+      0%,
+      100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.35;
+      }
+    }
     @media (prefers-reduced-motion: reduce) {
-      .alert-ring {
+      .alert-ring,
+      .current-ring {
         animation: none;
       }
     }

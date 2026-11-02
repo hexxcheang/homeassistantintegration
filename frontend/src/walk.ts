@@ -33,7 +33,8 @@ function labelOf(el: HomeElement): string {
   return el.label || el.productName;
 }
 
-function stepFor(el: HomeElement): WalkStep {
+/** What to ask the installer to do for this element, linked or not. */
+export function stepFor(el: HomeElement): WalkStep {
   const id = el.id;
   const category: CategoryId = el.categoryId;
   if (LIGHTING_CATEGORIES.has(category)) {

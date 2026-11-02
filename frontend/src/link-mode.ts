@@ -2,19 +2,74 @@ import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import { classMap } from 'lit/directives/class-map.js';
 import {
   createStarterScenes,
+  identify,
+  type IdentifyOptions,
+  type IdentifyResult,
   refreshApply,
   refreshPreview,
   setDisplay,
   setLinks,
   uploadHomeFile,
 } from './api.ts';
-import { errorMessage, linkName } from './hass-util.ts';
+import { errorMessage, linkName, release } from './hass-util.ts';
 import { LIGHTING_CATEGORIES, linkCandidates } from './link-candidates.ts';
-import type { ChangedElement, HassLike, HomeElement, HomeResponse, Link, RefreshSummary } from './types.ts';
+import type {
+  ChangedElement,
+  HassConnection,
+  HassLike,
+  HomeElement,
+  HomeResponse,
+  Link,
+  RefreshSummary,
+} from './types.ts';
 import { visualState, type VisualStatus } from './visual-state.ts';
+import { stepFor, Walk, type WalkStep } from './walk.ts';
 
 const NOTICE_MS = 5000;
 const MIXED_KINDS = 'Select lights together, or other devices together, not both.';
+/** How long "Linked: …" stays, with its Undo, before the walk moves on. */
+const TOAST_MS = 2000;
+const AMBIGUOUS = 'Two devices reacted. Press once more.';
+const WALK_STOPPED = 'The walk stopped because installer mode was switched off.';
+const IDENTIFY_STOPPED = 'Identifying stopped because installer mode was switched off.';
+const OTHER_LIGHTS = 'Tap the other lights that came on';
+
+/** The steps that wait for a press (the others are picked from a list). */
+type PressStep = Exclude<WalkStep, { kind: 'pick' }>;
+
+/**
+ * Where the walk is on its current step: `waiting` for a press (or a pick), `linking` while the
+ * press is being saved, `others` for the lights step waiting for the other lights that came on,
+ * `linked` while "Linked: …" and its Undo show.
+ */
+type WalkPhase = 'waiting' | 'linking' | 'others' | 'linked';
+
+/** What was linked on this step, for the "Linked: …" toast and its Undo. */
+interface Toast {
+  link: Link;
+  name: string;
+  /** The elements linked, the walk's own first. */
+  ids: string[];
+  /** What each had before (`null`: no link), which Undo puts back. */
+  previous: Record<string, Link | null>;
+}
+
+/** A lights step after its first press: the gang is linked to the highlighted light; others may join. */
+interface Group {
+  elementId: string;
+  link: Link;
+  name: string;
+  /** Lights tapped since, linked together on Done. */
+  others: string[];
+  previous: Record<string, Link | null>;
+}
+
+/** What the server pushes when the installer pressed something (not "ambiguous" or "stopped"). */
+const isFound = (result: IdentifyResult): result is Extract<IdentifyResult, { name: string }> =>
+  typeof (result as { name?: unknown }).name === 'string';
+
+const sameLink = (a: Link | null | undefined, b: Link | null | undefined): boolean =>
+  (a ?? null) === (b ?? null) || (a != null && b != null && a.type === b.type && a.id === b.id);
 
 interface Notice {
   text: string;
@@ -63,6 +118,13 @@ export class MaxsenLinkMode extends LitElement {
     _notice: { state: true },
     _busy: { state: true },
     _dialog: { state: true },
+    _walk: { state: true },
+    _phase: { state: true },
+    _toast: { state: true },
+    _group: { state: true },
+    _ambiguous: { state: true },
+    _includeOther: { state: true },
+    _pressing: { state: true },
   };
 
   declare hass: HassLike | undefined;
@@ -74,11 +136,35 @@ export class MaxsenLinkMode extends LitElement {
   declare private _notice: Notice | undefined;
   declare private _busy: boolean;
   declare private _dialog: Dialog | undefined;
+  /** The linking walk, when one is on. Mutable: call `requestUpdate()` after changing it. */
+  declare private _walk: Walk | undefined;
+  declare private _phase: WalkPhase;
+  declare private _toast: Toast | undefined;
+  declare private _group: Group | undefined;
+  /** Two devices reacted; shown until the next press or step. */
+  declare private _ambiguous: boolean;
+  /** Count devices that are not Zigbee too. */
+  declare private _includeOther: boolean;
+  /** Listening for the press of the one selected marker (outside the walk). */
+  declare private _pressing: boolean;
 
   private _known = new Map<string, Known>();
   /** Bumped when the dialog is closed, so an answer that arrives later does not reopen it. */
   private _dialogRun = 0;
   private _noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  private _toastTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Ends the identify subscription in use, if any. */
+  private _stopListen: (() => void | Promise<void>) | undefined;
+  /** Bumped whenever the subscription in use is replaced or ended, so a late answer can tell. */
+  private _listenToken = 0;
+  /** What the single-marker press is listening for ('' for nothing), to subscribe only on a change. */
+  private _singleKey = '';
+  /** Links this element wrote that the home it was given may not show yet; see `_walkHome`. */
+  private _expected = new Map<string, Link | null>();
+  /** The element id last announced with `maxsen-current`. */
+  private _announced: string | undefined;
+  /** The connection whose `ready` (reconnected) event this element listens to. */
+  private _connection: HassConnection | undefined;
 
   constructor() {
     super();
@@ -86,14 +172,33 @@ export class MaxsenLinkMode extends LitElement {
     this._multi = false;
     this._search = '';
     this._busy = false;
+    this._phase = 'waiting';
+    this._ambiguous = false;
+    this._includeOther = false;
+    this._pressing = false;
+  }
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this._bindConnection();
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    this._bindConnection();
     clearTimeout(this._noticeTimer);
+    // Nothing may listen or move on for an element that is gone.
+    this._stopListening();
+    this._clearToast();
+    this._walk = undefined;
+    this._group = undefined;
+    this._pressing = false;
+    this._singleKey = '';
+    this._expected.clear();
   }
 
   override willUpdate(changed: Map<PropertyKey, unknown>): void {
+    if (changed.has('hass')) this._bindConnection();
     if (!changed.has('home')) return;
     this._known = new Map(
       (this.home?.package?.levels ?? []).flatMap((level) =>
@@ -105,6 +210,16 @@ export class MaxsenLinkMode extends LitElement {
     // A refresh can take away what was selected.
     const kept = this._selected.filter((id) => this._known.has(id));
     if (kept.length !== this._selected.length) this._select(kept);
+    this._homeChanged();
+  }
+
+  override updated(): void {
+    const current = this._walk?.current?.elementId;
+    if (current === this._announced) return;
+    this._announced = current;
+    this.dispatchEvent(
+      new CustomEvent('maxsen-current', { detail: { elementId: current }, bubbles: true, composed: true }),
+    );
   }
 
   // ---- selection ----
@@ -113,6 +228,10 @@ export class MaxsenLinkMode extends LitElement {
   tap(elementId: string): void {
     const tapped = this._known.get(elementId)?.el;
     if (!tapped) return;
+    if (this._walk) {
+      this._tapInWalk(tapped);
+      return;
+    }
     const current = this._selected;
     if (current.includes(elementId)) {
       this._select(current.filter((id) => id !== elementId));
@@ -134,6 +253,7 @@ export class MaxsenLinkMode extends LitElement {
     this.dispatchEvent(
       new CustomEvent('maxsen-selection', { detail: { selected: ids }, bubbles: true, composed: true }),
     );
+    this._syncSingle();
   }
 
   private _toggleMulti(): void {
@@ -149,23 +269,421 @@ export class MaxsenLinkMode extends LitElement {
 
   // ---- linking ----
 
-  private async _link(link: Link | null): Promise<void> {
+  /**
+   * Link the selected elements to `link` (or unlink them). `nameDevice` also names a device after
+   * its marker and puts it in its level's area; `name` is what the notice calls the link.
+   * Resolves to whether the link was saved.
+   */
+  private async _link(
+    link: Link | null,
+    options: { nameDevice?: boolean; name?: string } = {},
+  ): Promise<boolean> {
     const { hass, entryId } = this;
-    if (!hass || !entryId || this._busy) return;
+    if (!hass || !entryId || this._busy) return false;
     const targets = link === null ? this._selected.filter((id) => this.home?.links[id]) : this._selected;
-    if (targets.length === 0) return;
+    if (targets.length === 0) return false;
     this._busy = true;
     try {
-      await setLinks(hass, entryId, Object.fromEntries(targets.map((id) => [id, link])));
+      await setLinks(hass, entryId, Object.fromEntries(targets.map((id) => [id, link])), {
+        nameDevice: options.nameDevice && link?.type === 'device',
+      });
       const many = targets.length > 1;
       const verb = link === null ? 'Unlinked' : 'Linked';
-      this._say(many ? `${verb} ${targets.length} elements.` : `${verb}.`, false);
+      this._say(
+        many ? `${verb} ${targets.length} elements.` : options.name ? `${verb}: ${options.name}` : `${verb}.`,
+        false,
+      );
       this._select([]);
+      if (link && this._walk) this._pickedInWalk(targets, link);
+      return true;
     } catch (err) {
       this._say(errorMessage(err, 'Could not save the link. Try again.'), true);
+      return false;
     } finally {
       this._busy = false;
     }
+  }
+
+  // ---- listening for a press ----
+
+  private _bindConnection(): void {
+    const connection = this.isConnected ? this.hass?.connection : undefined;
+    if (connection === this._connection) return;
+    this._connection?.removeEventListener?.('ready', this._onReconnect);
+    this._connection = connection;
+    connection?.addEventListener?.('ready', this._onReconnect);
+  }
+
+  /**
+   * The websocket came back: the server forgot the prompt (a subscription made with
+   * `resubscribe: false` is not brought back), so ask it again for the step the installer is on.
+   */
+  private _onReconnect = (): void => {
+    const step = this._walk?.current;
+    if (this._walk) {
+      if (this._phase === 'waiting' && step && step.kind !== 'pick') this._listenForStep(step);
+    } else if (this._pressing) {
+      this._singleKey = '';
+      this._syncSingle();
+    }
+  };
+
+  /** Listen for what the installer presses; any earlier subscription ends first. */
+  private _listen(options: IdentifyOptions, onResult: (result: IdentifyResult) => void): void {
+    this._stopListening();
+    const { hass, entryId } = this;
+    if (!hass || !entryId) return;
+    const token = this._listenToken;
+    identify(hass, entryId, options, (result) => {
+      if (token === this._listenToken) onResult(result);
+    }).then(
+      (stop) => {
+        // The prompt may be over before the server answered: end the subscription at once.
+        if (token === this._listenToken) this._stopListen = stop;
+        else release(stop);
+      },
+      (err: unknown) => {
+        if (token === this._listenToken) {
+          this._say(errorMessage(err, 'Could not listen for a press. Try again.'), true);
+        }
+      },
+    );
+  }
+
+  private _stopListening(): void {
+    this._listenToken++;
+    release(this._stopListen);
+    this._stopListen = undefined;
+  }
+
+  private _identifyOptions(step: PressStep): IdentifyOptions {
+    return {
+      mode: step.mode,
+      kinds: step.kinds,
+      gangs: step.kind === 'device' ? step.gangs : null,
+      includeOther: this._includeOther,
+    };
+  }
+
+  private _linkOf(result: { device_id: string } | { entity_id: string }): Link {
+    return 'device_id' in result
+      ? { type: 'device', id: result.device_id }
+      : { type: 'entity', id: result.entity_id };
+  }
+
+  /** What a link is called now: after Maxsen names a device, its new name. */
+  private _nameOf(link: Link, fallback: string): string {
+    return (this.hass && linkName(link, this.hass)) ?? fallback;
+  }
+
+  private _toggleIncludeOther(): void {
+    this._includeOther = !this._includeOther;
+    this._ambiguous = false;
+    const step = this._walk?.current;
+    if (this._walk) {
+      if (this._phase === 'waiting' && step && step.kind !== 'pick') this._listenForStep(step);
+    } else {
+      this._singleKey = '';
+      this._syncSingle();
+    }
+  }
+
+  // ---- press to identify, outside the walk ----
+
+  /** With exactly one marker selected (and no walk), listen for the press of its device. */
+  private _syncSingle(): void {
+    let step: PressStep | undefined;
+    if (!this._walk && this._selected.length === 1) {
+      const el = this._known.get(this._selected[0] ?? '')?.el;
+      const found = el && stepFor(el);
+      if (found && found.kind !== 'pick') step = found;
+    }
+    const key = step ? `${step.elementId}|${this._includeOther}` : '';
+    if (key === this._singleKey) return;
+    this._singleKey = key;
+    this._ambiguous = false;
+    this._pressing = step !== undefined;
+    if (!step) {
+      this._stopListening();
+      return;
+    }
+    this._listen(this._identifyOptions(step), (result) => void this._onSinglePress(step, result));
+  }
+
+  private async _onSinglePress(step: PressStep, result: IdentifyResult): Promise<void> {
+    if ('stopped' in result) {
+      this._stopListening();
+      this._pressing = false;
+      this._say(IDENTIFY_STOPPED, true);
+      return;
+    }
+    if ('ambiguous' in result) {
+      this._ambiguous = true;
+      return;
+    }
+    if (!isFound(result)) return;
+    this._stopListening();
+    this._ambiguous = false;
+    const link = this._linkOf(result);
+    // The installer may have selected something else while the press was on its way.
+    if (this._selected.length !== 1 || this._selected[0] !== step.elementId) return;
+    const saved = await this._link(link, {
+      nameDevice: link.type === 'device',
+      name: this._nameOf(link, result.name),
+    });
+    if (!saved) {
+      // Still selected: listen again.
+      this._singleKey = '';
+      this._syncSingle();
+    }
+  }
+
+  // ---- the linking walk ----
+
+  private _startWalk(): void {
+    const home = this.home;
+    if (!home || this._walk) return;
+    const walk = new Walk(home);
+    if (!walk.current) {
+      this._say('Every element is linked.', false);
+      return;
+    }
+    this._walk = walk;
+    this._expected.clear();
+    this._select([]); // ends a single press that was on
+    this._beginStep();
+  }
+
+  /** The step the walk is on: say what to do, listen for it (or show the list). */
+  private _beginStep(): void {
+    const walk = this._walk;
+    const step = walk?.current;
+    this._clearToast();
+    this._group = undefined;
+    this._ambiguous = false;
+    this._phase = 'waiting';
+    this.requestUpdate();
+    if (!walk || !step) {
+      this._endWalk('Every element is linked.', false);
+      return;
+    }
+    if (step.kind === 'pick') {
+      this._stopListening();
+      this._select([step.elementId]);
+      return;
+    }
+    this._select([]);
+    this._listenForStep(step);
+  }
+
+  private _listenForStep(step: PressStep): void {
+    this._ambiguous = false;
+    this._listen(this._identifyOptions(step), (result) => void this._onWalkPress(step, result));
+  }
+
+  private _endWalk(message?: string, error = false): void {
+    this._stopListening();
+    this._clearToast();
+    this._walk = undefined;
+    this._group = undefined;
+    this._phase = 'waiting';
+    this._ambiguous = false;
+    this._expected.clear();
+    this._select([]);
+    if (message) this._say(message, error);
+  }
+
+  private _clearToast(): void {
+    clearTimeout(this._toastTimer);
+    this._toastTimer = undefined;
+    this._toast = undefined;
+  }
+
+  private async _onWalkPress(step: PressStep, result: IdentifyResult): Promise<void> {
+    const walk = this._walk;
+    if ('stopped' in result) {
+      this._endWalk(WALK_STOPPED, true);
+      return;
+    }
+    if ('ambiguous' in result) {
+      this._ambiguous = true;
+      return;
+    }
+    const { hass, entryId } = this;
+    if (!isFound(result) || !walk || !hass || !entryId) return;
+    this._stopListening(); // a prompt is one press
+    this._ambiguous = false;
+    const link = this._linkOf(result);
+    const el = step.elementId;
+    const previous = { [el]: this._walkHome()?.links[el] ?? null };
+    this._phase = 'linking';
+    try {
+      await setLinks(hass, entryId, { [el]: link }, { nameDevice: step.kind === 'device' });
+    } catch (err) {
+      if (this._walk !== walk) return;
+      this._say(errorMessage(err, 'Could not save the link. Try again.'), true);
+      this._phase = 'waiting';
+      this._listenForStep(step);
+      return;
+    }
+    if (this._walk !== walk) return; // stopped meanwhile; the link stays
+    if (step.kind === 'device') {
+      this._showToast({ link, name: result.name, ids: [el], previous });
+    } else {
+      this._group = { elementId: el, link, name: result.name, others: [], previous };
+      this._phase = 'others';
+    }
+  }
+
+  private _showToast(toast: Toast): void {
+    this._toast = toast;
+    this._phase = 'linked';
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => this._advance(), TOAST_MS);
+  }
+
+  /** The toast is over: what was linked leaves the walk, and the next element is asked about. */
+  private _advance(): void {
+    const toast = this._toast;
+    if (!toast || !this._walk) return;
+    this._afterLinked(toast.ids, toast.link);
+  }
+
+  /** These elements are linked to `link` and done with: take them out of the walk and go on. */
+  private _afterLinked(ids: string[], link: Link): void {
+    const walk = this._walk;
+    if (!walk) return;
+    walk.linked(ids, link);
+    for (const id of ids) this._expected.set(id, link);
+    const home = this._walkHome();
+    if (home) walk.refresh(home);
+    this._beginStep();
+  }
+
+  /** Done on the lights step: the lights tapped since join the gang in one save. */
+  private async _doneGroup(): Promise<void> {
+    const { hass, entryId } = this;
+    const group = this._group;
+    const walk = this._walk;
+    if (!hass || !entryId || !group || !walk || this._busy) return;
+    const previous = { ...group.previous };
+    if (group.others.length > 0) {
+      for (const id of group.others) previous[id] = this._walkHome()?.links[id] ?? null;
+      this._busy = true;
+      try {
+        await setLinks(hass, entryId, Object.fromEntries(group.others.map((id) => [id, group.link])));
+      } catch (err) {
+        this._say(errorMessage(err, 'Could not save the links. Try again.'), true);
+        return;
+      } finally {
+        this._busy = false;
+      }
+      if (this._walk !== walk) return;
+    }
+    this._group = undefined;
+    this._select([]);
+    this._showToast({
+      link: group.link,
+      name: group.name,
+      ids: [group.elementId, ...group.others],
+      previous,
+    });
+  }
+
+  /** Undo: put back what the last step linked (a toast's, or a lights step before Done) and ask again. */
+  private async _undo(): Promise<void> {
+    const { hass, entryId } = this;
+    const walk = this._walk;
+    const done = this._toast ?? this._group;
+    if (!hass || !entryId || !walk || !done || this._busy) return;
+    const toast = this._toast;
+    clearTimeout(this._toastTimer);
+    this._busy = true;
+    try {
+      await setLinks(hass, entryId, done.previous);
+    } catch (err) {
+      this._say(errorMessage(err, 'Could not undo the link. Try again.'), true);
+      // Still linked: carry on as if it had been left.
+      if (this._walk === walk && toast) this._advance();
+      return;
+    } finally {
+      this._busy = false;
+    }
+    if (this._walk !== walk) return;
+    for (const [id, link] of Object.entries(done.previous)) this._expected.set(id, link);
+    this._beginStep();
+  }
+
+  private _skip(): void {
+    const walk = this._walk;
+    if (!walk || this._phase !== 'waiting') return;
+    walk.skip();
+    this._beginStep();
+  }
+
+  private _back(): void {
+    const walk = this._walk;
+    if (!walk || this._phase !== 'waiting') return;
+    walk.back();
+    this._beginStep();
+  }
+
+  private _tapInWalk(el: HomeElement): void {
+    const walk = this._walk;
+    if (!walk) return;
+    const group = this._group;
+    if (this._phase === 'others' && group) {
+      // Lights that came on join the gang; one that already has a gang is moved to this one.
+      if (!isLight(el) || el.id === group.elementId) return;
+      const others = group.others.includes(el.id)
+        ? group.others.filter((id) => id !== el.id)
+        : [...group.others, el.id];
+      this._group = { ...group, others };
+      this._select(others);
+      return;
+    }
+    if (this._phase !== 'waiting') return;
+    const before = walk.current?.elementId;
+    walk.jump(el.id);
+    if (walk.current?.elementId !== before) this._beginStep();
+  }
+
+  /** A device was picked from the list while the walk is on a pick step. */
+  private _pickedInWalk(ids: string[], link: Link): void {
+    const step = this._walk?.current;
+    if (step?.kind === 'pick' && ids.includes(step.elementId)) this._afterLinked(ids, link);
+  }
+
+  /**
+   * The home the walk plans from: what the server showed, with the links this element saved but the
+   * home may not show yet. A home loaded before a link was saved would otherwise put its element
+   * back in the queue.
+   */
+  private _walkHome(): HomeResponse | undefined {
+    const home = this.home;
+    if (!home || this._expected.size === 0) return home;
+    const links = { ...home.links };
+    for (const [id, link] of this._expected) {
+      if (link) links[id] = link;
+      else delete links[id];
+    }
+    return { ...home, links };
+  }
+
+  /** A new home arrived: drop what it now shows, and let the walk follow what changed elsewhere. */
+  private _homeChanged(): void {
+    const home = this.home;
+    if (!home) return;
+    for (const [id, link] of [...this._expected]) {
+      if (sameLink(home.links[id], link)) this._expected.delete(id);
+    }
+    const walk = this._walk;
+    // While a press is being saved or confirmed the walk stays where it is; it follows at the next step.
+    if (!walk || this._phase !== 'waiting') return;
+    const before = walk.current?.elementId;
+    const planned = this._walkHome();
+    if (planned) walk.refresh(planned);
+    if (walk.current?.elementId !== before || !walk.current) this._beginStep();
   }
 
   // ---- background ----
@@ -349,7 +867,7 @@ export class MaxsenLinkMode extends LitElement {
                 })}
                 data-link-id=${c.link.id}
                 ?disabled=${this._busy}
-                @click=${() => void this._link(c.link)}
+                @click=${() => void this._link(c.link, { nameDevice: this._walk !== undefined })}
               >
                 <span class="name">${c.name}</span>
                 <span class="sub">${[c.area, c.detail].filter(Boolean).join(' · ')}</span>
@@ -431,6 +949,65 @@ export class MaxsenLinkMode extends LitElement {
     </div>`;
   }
 
+  private _renderIncludeOther(): TemplateResult {
+    return html`<button
+      class="include-other"
+      role="switch"
+      aria-checked=${this._includeOther ? 'true' : 'false'}
+      @click=${() => this._toggleIncludeOther()}
+    >
+      <span class="track"><span class="knob"></span></span>
+      <span>Include other devices</span>
+    </button>`;
+  }
+
+  /** Outside the walk: with one marker selected, the hint to press its device. */
+  private _renderPressHint(): TemplateResult | typeof nothing {
+    if (this._walk || !this._pressing) return nothing;
+    return html`<div class="press-hint">
+      <p class="hint">Press the device now</p>
+      ${this._ambiguous ? html`<p class="press-warning" role="alert">${AMBIGUOUS}</p>` : nothing}
+      ${this._renderIncludeOther()}
+    </div>`;
+  }
+
+  /** The walk bar: where it is, what to do, and how to move through it. */
+  private _renderWalk(): TemplateResult | typeof nothing {
+    const walk = this._walk;
+    const step = walk?.current;
+    if (!walk || !step) return nothing;
+    const known = this._known.get(step.elementId);
+    const links = this._walkHome()?.links ?? {};
+    let linked = 0;
+    for (const id of this._known.keys()) if (links[id]) linked++;
+    const waiting = this._phase === 'waiting';
+    const toast = this._toast;
+    const group = this._group;
+    return html`<section class="walk" aria-label="Linking walk">
+      <div class="walk-head">
+        <span class="walk-progress">${linked} / ${this._known.size} linked</span>
+        <button class="walk-stop" @click=${() => this._endWalk()}>Stop</button>
+      </div>
+      ${known ? html`<div class="walk-for">${nameOf(known.el)} · ${known.levelName}</div>` : nothing}
+      ${toast
+        ? html`<div class="walk-toast" role="status">
+            <span class="walk-linked">Linked: ${this._nameOf(toast.link, toast.name)}</span>
+            <button class="walk-undo" ?disabled=${this._busy} @click=${() => void this._undo()}>Undo</button>
+          </div>`
+        : html`<p class="walk-prompt" role="status">${this._phase === 'others' ? OTHER_LIGHTS : step.prompt}</p>`}
+      ${this._ambiguous ? html`<p class="walk-warning" role="alert">${AMBIGUOUS}</p>` : nothing}
+      <div class="walk-actions">
+        ${group
+          ? html`<button class="walk-done primary" ?disabled=${this._busy} @click=${() => void this._doneGroup()}>Done</button>
+              <button class="walk-undo" ?disabled=${this._busy} @click=${() => void this._undo()}>Undo</button>`
+          : nothing}
+        <button class="walk-back" ?disabled=${!waiting} @click=${() => this._back()}>Back</button>
+        <button class="walk-skip" ?disabled=${!waiting} @click=${() => this._skip()}>Skip</button>
+      </div>
+      ${this._renderIncludeOther()}
+    </section>`;
+  }
+
   private _done(): void {
     this.dispatchEvent(new CustomEvent('maxsen-link-done', { bubbles: true, composed: true }));
   }
@@ -440,9 +1017,17 @@ export class MaxsenLinkMode extends LitElement {
     // planner, or from a file when the planner cannot be used (no internet, connection revoked).
     const fromFile = this.home?.source === 'file';
     const original = this.home?.display?.background === 'original';
+    const walking = this._walk !== undefined;
+    const picking = this._walk?.current?.kind === 'pick';
     return html`
+      ${this._renderWalk()}
       <div class="toolbar">
         <button class="done primary" @click=${this._done}>Done</button>
+        ${walking
+          ? nothing
+          : html`<button class="start-walk" ?disabled=${!this.home?.package} @click=${() => this._startWalk()}>
+              Start linking walk
+            </button>`}
         <button class="multi" aria-pressed=${this._multi ? 'true' : 'false'} @click=${this._toggleMulti}>
           Select several
         </button>
@@ -471,7 +1056,9 @@ export class MaxsenLinkMode extends LitElement {
         ? html`<p class=${classMap({ notice: true, error: this._notice.error })} role="status">${this._notice.text}</p>`
         : nothing}
       <div class="content">
-        ${this._renderCounts()} ${this._renderSelection()} ${this._renderCandidates()} ${this._renderNotDrawn()}
+        ${walking ? nothing : this._renderCounts()} ${!walking || picking ? this._renderSelection() : nothing}
+        ${this._renderPressHint()} ${!walking || picking ? this._renderCandidates() : nothing}
+        ${this._renderNotDrawn()}
       </div>
       ${this._renderDialog()}
     `;
@@ -526,7 +1113,8 @@ export class MaxsenLinkMode extends LitElement {
       gap: 12px;
       text-align: left;
     }
-    .original-background .track {
+    .original-background .track,
+    .include-other .track {
       position: relative;
       flex: none;
       width: 44px;
@@ -535,10 +1123,12 @@ export class MaxsenLinkMode extends LitElement {
       background: var(--disabled-color, #c4c8ce);
       transition: background 0.15s;
     }
-    .original-background[aria-checked='true'] .track {
+    .original-background[aria-checked='true'] .track,
+    .include-other[aria-checked='true'] .track {
       background: var(--primary-color, #2f6fed);
     }
-    .original-background .knob {
+    .original-background .knob,
+    .include-other .knob {
       position: absolute;
       top: 3px;
       left: 3px;
@@ -548,8 +1138,104 @@ export class MaxsenLinkMode extends LitElement {
       background: #fff;
       transition: transform 0.15s;
     }
-    .original-background[aria-checked='true'] .knob {
+    .original-background[aria-checked='true'] .knob,
+    .include-other[aria-checked='true'] .knob {
       transform: translateX(18px);
+    }
+    .include-other {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 44px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      font-size: 15px;
+    }
+    .walk {
+      /* The prompt stays in view while the rest of the tools scroll under it. */
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      border-bottom: 1px solid var(--divider-color, #e3e6ea);
+      background: color-mix(in srgb, var(--primary-color, #2f6fed) 8%, var(--card-background-color, #fff));
+    }
+    .walk-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .walk-progress {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--secondary-text-color, #5b6168);
+    }
+    .walk-for {
+      font-size: 15px;
+      color: var(--secondary-text-color, #5b6168);
+      overflow-wrap: anywhere;
+    }
+    .walk-prompt {
+      font-size: 19px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .walk-toast {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 19px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .walk-linked {
+      overflow-wrap: anywhere;
+    }
+    .walk-warning,
+    .press-warning {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--error-color, #b3261e);
+    }
+    .walk-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .walk button:not(.include-other),
+    .press-hint button:not(.include-other) {
+      min-height: 44px;
+      padding: 0 18px;
+      border: 1px solid var(--divider-color, #cfd3d9);
+      border-radius: 22px;
+      background: var(--card-background-color, #fff);
+      font-size: 16px;
+    }
+    .walk button.primary {
+      border-color: var(--primary-color, #2f6fed);
+      background: var(--primary-color, #2f6fed);
+      color: var(--text-primary-color, #fff);
+    }
+    .press-hint {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--primary-color, #2f6fed) 8%, transparent);
+    }
+    .press-hint .hint {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--primary-text-color, #1f1d1a);
     }
     .primary {
       border-color: var(--primary-color, #2f6fed);

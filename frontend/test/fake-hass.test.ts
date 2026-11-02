@@ -922,3 +922,314 @@ describe('parseHomeFile', () => {
     }
   });
 });
+
+// ---- press to identify ----
+
+type Pushed = Record<string, unknown>;
+
+/** Subscribe the way the frontend does, and collect what the fake pushes. */
+async function listen(
+  fake: FakeHass,
+  options: Record<string, unknown>,
+): Promise<{ got: Pushed[]; stop: () => void | Promise<void> }> {
+  const got: Pushed[] = [];
+  const stop = await fake.connection.subscribeMessage<Pushed>(
+    (m) => got.push(m),
+    { type: 'maxsen/identify/subscribe', entry_id: ENTRY, ...options },
+    { resubscribe: false },
+  );
+  return { got, stop };
+}
+
+const unlink = (fake: FakeHass, ...elementIds: string[]) =>
+  ws(fake, { type: 'maxsen/links/set', updates: Object.fromEntries(elementIds.map((id) => [id, null])) });
+
+/** The fake's one device that is not Zigbee, and its switch. */
+function wifiPlug(fake: FakeHass): { deviceId: string; entityId: string } {
+  const device = Object.values(fake.devices).find((d) => d.name === 'Hallway smart plug')!;
+  const entity = Object.values(fake.entities).find((e) => e.device_id === device.id)!;
+  return { deviceId: device.id, entityId: entity.entity_id };
+}
+
+describe('maxsen/identify/subscribe', () => {
+  it('reports the device whose button was pressed after the subscription, once the window has passed', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1');
+    fake.press('switch.entrance_switch_2'); // before: does not count
+    const { got } = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    vi.advanceTimersByTime(2000);
+    expect(got).toEqual([]);
+
+    fake.press('switch.entrance_switch_2');
+    vi.advanceTimersByTime(900);
+    expect(got).toEqual([]); // still waiting for a second candidate
+    vi.advanceTimersByTime(200);
+    expect(got).toEqual([{ device_id: 'device_sw1', name: 'Entrance switch' }]);
+  });
+
+  it('reports the name a person gave the device', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1');
+    fake.devices['device_sw1'] = { ...fake.devices['device_sw1']!, name_by_user: 'Front door switch' };
+    const { got } = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    fake.press('switch.entrance_switch_1');
+    vi.advanceTimersByTime(1100);
+    expect(got).toEqual([{ device_id: 'device_sw1', name: 'Front door switch' }]);
+  });
+
+  it('ignores devices that already have a link in device mode', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    const { got } = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    fake.press('switch.entrance_switch_1'); // sw1 is linked
+    vi.advanceTimersByTime(2000);
+    expect(got).toEqual([]);
+  });
+
+  it('never counts a setting or a hidden entity', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1');
+    fake.entities['switch.entrance_switch_3'] = { ...fake.entities['switch.entrance_switch_3']!, hidden: true };
+    const { got } = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    fake.press('switch.entrance_switch_backlight'); // entity_category: config
+    fake.press('switch.entrance_switch_3'); // hidden
+    vi.advanceTimersByTime(2000);
+    expect(got).toEqual([]);
+  });
+
+  it('counts only Zigbee devices unless other devices are included', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    const plug = wifiPlug(fake);
+    const only = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    const all = await listen(fake, { mode: 'device', kinds: ['switch'], include_other: true });
+    fake.press(plug.entityId);
+    vi.advanceTimersByTime(1100);
+    expect(only.got).toEqual([]);
+    expect(all.got).toEqual([{ device_id: plug.deviceId, name: 'Hallway smart plug' }]);
+  });
+
+  it('matches the gang count against the primary switches of the device', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1');
+    const two = await listen(fake, { mode: 'device', kinds: ['switch'], gangs: 2 });
+    const three = await listen(fake, { mode: 'device', kinds: ['switch'], gangs: 3 });
+    fake.press('switch.entrance_switch_1'); // 3 primary gangs and one backlight setting
+    vi.advanceTimersByTime(1100);
+    expect(two.got).toEqual([]);
+    expect(three.got).toEqual([{ device_id: 'device_sw1', name: 'Entrance switch' }]);
+  });
+
+  it('only counts the kinds asked for', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1', 'cur1', 'sen1');
+    const covers = await listen(fake, { mode: 'device', kinds: ['cover'] });
+    const sensors = await listen(fake, { mode: 'device', kinds: ['binary_sensor'] });
+    fake.press('switch.entrance_switch_1');
+    vi.advanceTimersByTime(1100);
+    expect(covers.got).toEqual([]);
+    expect(sensors.got).toEqual([]);
+
+    fake.press('cover.smart_curtain_track');
+    fake.press('binary_sensor.door_window_sensor_door');
+    vi.advanceTimersByTime(1100);
+    expect(covers.got).toEqual([{ device_id: 'device_cur1', name: 'Smart Curtain Track' }]);
+    expect(sensors.got).toEqual([{ device_id: 'device_sen1', name: 'Door/Window Sensor' }]);
+  });
+
+  it('says "ambiguous" when two devices react within a second, and links neither', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1');
+    const plug = wifiPlug(fake);
+    const { got } = await listen(fake, { mode: 'device', kinds: ['switch'], include_other: true });
+    fake.press('switch.entrance_switch_1');
+    vi.advanceTimersByTime(500);
+    fake.press(plug.entityId);
+    vi.advanceTimersByTime(600);
+    expect(got).toEqual([{ ambiguous: true }]);
+  });
+
+  it('takes the same switch pressed twice quickly as one candidate', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1');
+    const { got } = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    fake.press('switch.entrance_switch_1');
+    vi.advanceTimersByTime(300);
+    fake.press('switch.entrance_switch_2'); // another gang of the same device
+    vi.advanceTimersByTime(300);
+    fake.press('switch.entrance_switch_1');
+    vi.advanceTimersByTime(1100);
+    expect(got).toEqual([{ device_id: 'device_sw1', name: 'Entrance switch' }]);
+  });
+
+  it('entity mode: a gang turning on counts, a gang turning off does not, and a linked gang may be chosen', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    const gang = 'switch.level_1_lighting_1'; // linked to the downlights, and on
+    expect(fake.states[gang]!.state).toBe('on');
+    const { got } = await listen(fake, { mode: 'entity', kinds: ['light_gang'] });
+
+    fake.press(gang); // on -> off
+    vi.advanceTimersByTime(2000);
+    expect(got).toEqual([]);
+
+    fake.press(gang); // off -> on
+    vi.advanceTimersByTime(1100);
+    expect(got).toEqual([{ entity_id: gang, name: 'Level 1 lighting 1' }]);
+  });
+
+  it('entity mode is ambiguous when two gangs come on together', async () => {
+    vi.useFakeTimers();
+    const two = createFakeHass(pkgWithTwoGangs(), admin);
+    const { got } = await listen(two, { mode: 'entity', kinds: ['light_gang'] });
+    two.press('switch.level_1_lighting_2'); // off -> on
+    two.press('switch.level_1_lighting_1'); // on -> off: not a press
+    two.press('switch.level_1_lighting_1'); // off -> on
+    vi.advanceTimersByTime(1100);
+    expect(got).toEqual([{ ambiguous: true }]);
+  });
+
+  it('entity mode also needs a Zigbee device unless other devices are included', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    const plug = wifiPlug(fake);
+    const only = await listen(fake, { mode: 'entity', kinds: ['light_gang'] });
+    const all = await listen(fake, { mode: 'entity', kinds: ['light_gang'], include_other: true });
+    fake.press(plug.entityId); // on -> off
+    fake.press(plug.entityId); // off -> on
+    vi.advanceTimersByTime(1100);
+    expect(only.got).toEqual([]);
+    expect(all.got).toEqual([{ entity_id: plug.entityId, name: 'Hallway smart plug' }]);
+  });
+
+  it('stops listening when unsubscribed, and drops a candidate that is waiting', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1');
+    const { got, stop } = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    fake.press('switch.entrance_switch_1');
+    await stop();
+    vi.advanceTimersByTime(2000);
+    fake.press('switch.entrance_switch_1');
+    vi.advanceTimersByTime(2000);
+    expect(got).toEqual([]);
+  });
+
+  it('tells the subscriber once when installer mode is switched off, then goes quiet', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1');
+    const { got } = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    fake.setInstallerMode(false);
+    fake.setInstallerMode(true);
+    fake.press('switch.entrance_switch_1');
+    vi.advanceTimersByTime(2000);
+    expect(got).toEqual([{ stopped: true }]);
+  });
+
+  it('ends a prompt, telling the subscriber, when another home is opened; the new home has its own plug', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    const { got } = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    fake.openHome(fresh());
+    expect(got).toEqual([{ stopped: true }]);
+    expect(wifiPlug(fake).entityId).toBe('switch.hallway_smart_plug');
+  });
+
+  it('is for administrators in installer mode only', async () => {
+    const message = { type: 'maxsen/identify/subscribe', entry_id: ENTRY, mode: 'device', kinds: ['switch'] };
+    const off = createFakeHass(fresh(), { admin: true, installerMode: false });
+    await expect(off.connection.subscribeMessage(() => undefined, message)).rejects.toMatchObject({
+      code: 'not_allowed',
+    });
+    const user = createFakeHass(fresh(), { admin: false, installerMode: true });
+    await expect(user.connection.subscribeMessage(() => undefined, message)).rejects.toMatchObject({
+      code: 'not_allowed',
+    });
+  });
+
+  it('refuses a request the server schema refuses', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const base = { type: 'maxsen/identify/subscribe', entry_id: ENTRY, mode: 'device', kinds: ['switch'] };
+    for (const bad of [
+      { mode: 'both' },
+      { kinds: ['lock'] },
+      { kinds: 'switch' },
+      { gangs: 0 },
+      { gangs: '3' },
+      { include_other: 'yes' },
+    ]) {
+      await expect(
+        fake.connection.subscribeMessage(() => undefined, { ...base, ...bad }),
+        JSON.stringify(bad),
+      ).rejects.toMatchObject({ code: 'invalid_format' });
+    }
+    await expect(
+      fake.connection.subscribeMessage(() => undefined, { ...base, entry_id: 'other' }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('loses a subscription made without resubscribe when Home Assistant restarts', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    const { stop } = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    fake.restart(0);
+    await expect(stop()).rejects.toMatchObject({ code: 'not_found' });
+  });
+});
+
+describe('the Press a device menu', () => {
+  it('lists the gangs of devices and the lighting gangs, without settings', () => {
+    const fake = createFakeHass(fresh(), admin);
+    const targets = fake.pressTargets();
+    const byEntity = new Map(targets.map((t) => [t.entityId, t]));
+    expect([...byEntity.keys()]).toEqual(
+      expect.arrayContaining([
+        'switch.entrance_switch_1',
+        'switch.entrance_switch_2',
+        'switch.entrance_switch_3',
+        'cover.smart_curtain_track',
+        'binary_sensor.door_window_sensor_door',
+        'binary_sensor.motion_sensor_motion',
+        'switch.level_1_lighting_1',
+      ]),
+    );
+    expect(byEntity.has('switch.entrance_switch_backlight')).toBe(false);
+    expect(byEntity.has('sensor.door_window_sensor_temperature')).toBe(false);
+    expect(byEntity.get('switch.entrance_switch_2')!.label).toBe('Entrance switch 2');
+    expect(byEntity.get('switch.level_1_lighting_1')!.label).toBe('Level 1 lighting 1');
+    expect(new Set(targets.map((t) => t.entityId)).size).toBe(targets.length);
+  });
+
+  it('flips the device it presses and tells whoever re-renders', () => {
+    const fake = createFakeHass(fresh(), admin);
+    const changed = vi.fn();
+    fake.onChange(changed);
+    expect(fake.states['switch.entrance_switch_1']!.state).toBe('on');
+    fake.press('switch.entrance_switch_1');
+    expect(fake.states['switch.entrance_switch_1']!.state).toBe('off');
+    fake.press('switch.entrance_switch_1');
+    expect(fake.states['switch.entrance_switch_1']!.state).toBe('on');
+    expect(changed).toHaveBeenCalledTimes(2);
+
+    fake.press('cover.smart_curtain_track');
+    expect(fake.states['cover.smart_curtain_track']!.state).toBe('closed');
+    fake.press('binary_sensor.motion_sensor_motion');
+    expect(fake.states['binary_sensor.motion_sensor_motion']!.state).toBe('on');
+  });
+});
+
+/** The fixture with a second lighting gang: elements dl1..dl5 on one plan make two gangs. */
+function pkgWithTwoGangs(): HomePackage {
+  const pkg = fresh();
+  const lighting = pkg.levels[0]!.plans.find((p) => p.type === 'lighting')!;
+  lighting.elements.push({ ...lighting.elements[0]!, id: 'dl5' });
+  return pkg;
+}

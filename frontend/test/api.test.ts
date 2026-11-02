@@ -3,6 +3,7 @@ import {
   createStarterScenes,
   findEntry,
   getHome,
+  identify,
   loadImage,
   refreshApply,
   refreshPreview,
@@ -104,6 +105,58 @@ describe('subscribe', () => {
     const hass = makeHass();
     const spy = vi.spyOn(hass.connection, 'subscribeMessage').mockResolvedValue(() => undefined);
     await subscribe(hass, 'e1', () => undefined);
+    expect(spy.mock.calls[0]?.[2]).toEqual({ resubscribe: false });
+  });
+});
+
+describe('identify', () => {
+  it('subscribes with the options, passes every push on and resolves to the unsubscribe function', async () => {
+    const hass = makeHass();
+    const unsub = vi.fn();
+    let deliver: (m: unknown) => void = () => undefined;
+    const spy = vi.spyOn(hass.connection, 'subscribeMessage').mockImplementation(async (cb) => {
+      deliver = cb as typeof deliver;
+      return unsub;
+    });
+    const seen: unknown[] = [];
+
+    const stop = await identify(
+      hass,
+      'e1',
+      { mode: 'device', kinds: ['switch'], gangs: 3, includeOther: true },
+      (m) => seen.push(m),
+    );
+    deliver({ device_id: 'd1', name: 'Hall' });
+    deliver({ ambiguous: true });
+    deliver({ stopped: true });
+
+    expect(spy.mock.calls[0]?.[1]).toEqual({
+      type: 'maxsen/identify/subscribe',
+      entry_id: 'e1',
+      mode: 'device',
+      kinds: ['switch'],
+      gangs: 3,
+      include_other: true,
+    });
+    expect(seen).toEqual([{ device_id: 'd1', name: 'Hall' }, { ambiguous: true }, { stopped: true }]);
+    expect(stop).toBe(unsub);
+  });
+
+  it('leaves out a gang count that is not stated, and does not include other devices by default', async () => {
+    const hass = makeHass();
+    const spy = vi.spyOn(hass.connection, 'subscribeMessage').mockResolvedValue(() => undefined);
+    await identify(hass, 'e1', { mode: 'entity', kinds: ['light_gang'], gangs: null }, () => undefined);
+    await identify(hass, 'e1', { mode: 'device', kinds: ['cover'] }, () => undefined);
+    expect(spy.mock.calls.map((c) => c[1])).toEqual([
+      { type: 'maxsen/identify/subscribe', entry_id: 'e1', mode: 'entity', kinds: ['light_gang'], include_other: false },
+      { type: 'maxsen/identify/subscribe', entry_id: 'e1', mode: 'device', kinds: ['cover'], include_other: false },
+    ]);
+  });
+
+  it('passes { resubscribe: false }: a reconnect must not bring a stale prompt back', async () => {
+    const hass = makeHass();
+    const spy = vi.spyOn(hass.connection, 'subscribeMessage').mockResolvedValue(() => undefined);
+    await identify(hass, 'e1', { mode: 'device', kinds: ['switch'] }, () => undefined);
     expect(spy.mock.calls[0]?.[2]).toEqual({ resubscribe: false });
   });
 });

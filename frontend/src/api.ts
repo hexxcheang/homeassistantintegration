@@ -1,3 +1,4 @@
+import type { IdentifyKind } from './walk.ts';
 import type { DisplayBackground, DisplaySettings, HassLike, HomeResponse, Link, QuickItem, RefreshSummary } from './types.ts';
 
 /** What changed on the server; the view reloads the home on any of them. */
@@ -64,6 +65,49 @@ export function setLinks(
     updates,
     ...(options.nameDevice ? { name_device: true } : {}),
   });
+}
+
+/** What `maxsen/identify/subscribe` listens for. */
+export interface IdentifyOptions {
+  /** `device`: a device with no link yet; `entity`: a gang (it may already be linked). */
+  mode: 'device' | 'entity';
+  kinds: IdentifyKind[];
+  /** Only devices with exactly this many switch gangs. */
+  gangs?: number | null;
+  /** Count devices that are not Zigbee too. */
+  includeOther?: boolean;
+}
+
+/** What the server pushes: the thing pressed, two things at once, or the end of the subscription. */
+export type IdentifyResult =
+  | { device_id: string; name: string }
+  | { entity_id: string; name: string }
+  | { ambiguous: true }
+  | { stopped: true };
+
+/**
+ * Calls `callback` with what the installer presses from now on (installer mode only). Resolves to
+ * the unsubscribe function. Like `subscribe`, it does not resubscribe itself: after a reconnect a
+ * prompt is stale, and the caller asks again.
+ */
+export function identify(
+  hass: HassLike,
+  entryId: string,
+  options: IdentifyOptions,
+  callback: (result: IdentifyResult) => void,
+): Promise<() => void | Promise<void>> {
+  return hass.connection.subscribeMessage<IdentifyResult>(
+    callback,
+    {
+      type: 'maxsen/identify/subscribe',
+      entry_id: entryId,
+      mode: options.mode,
+      kinds: options.kinds,
+      ...(options.gangs ? { gangs: options.gangs } : {}),
+      include_other: options.includeOther ?? false,
+    },
+    { resubscribe: false },
+  );
 }
 
 export function setQuickPanel(

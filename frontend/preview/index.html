@@ -83,6 +83,18 @@
       .segmented label:has(input:checked) { background: var(--bar-accent); color: #0b1522; font-weight: 600; }
       .toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
       .toggle input { width: 16px; height: 16px; accent-color: var(--bar-accent); }
+      .toolbar select {
+        min-height: 34px;
+        max-width: 260px;
+        padding: 0 10px;
+        border: 1px solid #4a5568;
+        border-radius: 6px;
+        background: #2b3341;
+        color: var(--bar-text);
+        font: inherit;
+        cursor: pointer;
+      }
+      .toolbar select:focus-visible { outline: 2px solid var(--bar-accent); outline-offset: 1px; }
 
       .status {
         flex: 1 1 260px;
@@ -155,6 +167,13 @@
       <div class="segmented" role="radiogroup" aria-label="Frame">
         <label><input type="radio" name="frame" value="panel" checked />Panel 1280×800</label>
         <label><input type="radio" name="frame" value="phone" />Phone 390×844</label>
+      </div>
+
+      <div class="group">
+        <select id="press" aria-label="Press a device" title="Flip a fake device, as if someone pressed it: the walk and press-to-identify listen for this">
+          <option value="">Press a device…</option>
+        </select>
+        <button id="unlink-all" type="button" title="Unlink every marker, so the linking walk has something to do">Unlink everything</button>
       </div>
 
       <div class="group">

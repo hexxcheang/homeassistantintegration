@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildQueue, Walk } from '../src/walk.ts';
+import { buildQueue, stepFor, Walk } from '../src/walk.ts';
 import type { CategoryId, HomeElement, HomeResponse, Link, SceneItem, StoredHomePackage } from '../src/types.ts';
 import { element } from './helpers.ts';
 import { homeResponse } from './view-helpers.ts';
@@ -485,5 +485,16 @@ describe('Walk.refresh (a walk resumed after being left half way)', () => {
     const w = new Walk(homeResponse());
     w.refresh(homeResponse({ package: null }));
     expect(w.current).toBeUndefined();
+  });
+});
+
+describe('stepFor', () => {
+  it('gives the step for one element whether or not it is linked, as the walk would', () => {
+    const steps = buildQueue(withLinks({}));
+    const byId = new Map(steps.map((s) => [s.elementId, s]));
+    const pkg = homeResponse().package!;
+    for (const e of pkg.levels.flatMap((l) => l.plans.flatMap((p) => p.elements))) {
+      expect(stepFor(e), e.id).toEqual(byId.get(e.id));
+    }
   });
 });

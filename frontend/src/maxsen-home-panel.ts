@@ -1,5 +1,6 @@
 import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import { findEntry, getHome, subscribe } from './api.ts';
+import { release } from './hass-util.ts';
 import './floorplan-view.ts';
 import './link-mode.ts';
 import './quick-panel.ts';
@@ -28,15 +29,6 @@ function isNotReady(err: unknown): boolean {
 
 export function retryDelay(attempt: number): number {
   return RETRY_DELAYS_MS[attempt] ?? RETRY_EVERY_MS;
-}
-
-/** End a subscription without caring whether it still exists (after a reconnect it may not). */
-function release(unsubscribe: (() => void | Promise<void>) | undefined): void {
-  try {
-    void Promise.resolve(unsubscribe?.()).catch(() => undefined);
-  } catch {
-    // Already gone.
-  }
 }
 
 export type PanelLayout = 'side' | 'stacked';
@@ -68,6 +60,7 @@ export class MaxsenHomePanel extends LitElement {
     _layout: { state: true },
     _linking: { state: true },
     _selected: { state: true },
+    _current: { state: true },
   };
 
   declare hass: HassLike | undefined;
@@ -81,6 +74,8 @@ export class MaxsenHomePanel extends LitElement {
   declare private _linking: boolean;
   /** The elements selected in link mode, outlined on the drawing. */
   declare private _selected: string[];
+  /** The element the linking walk asks about, pulsing on the drawing. */
+  declare private _current: string | undefined;
 
   private _entryId: string | undefined;
   /** The entry id the card or panel was configured with when the current run started, if any. */
@@ -104,6 +99,7 @@ export class MaxsenHomePanel extends LitElement {
     this._layout = 'stacked';
     this._linking = false;
     this._selected = [];
+    this._current = undefined;
   }
 
   override connectedCallback(): void {
@@ -155,6 +151,7 @@ export class MaxsenHomePanel extends LitElement {
   private _closeInstaller(): void {
     this._linking = false;
     this._selected = [];
+    this._current = undefined;
   }
 
   override updated(changed: Map<PropertyKey, unknown>): void {
@@ -290,6 +287,7 @@ export class MaxsenHomePanel extends LitElement {
               .hass=${this.hass}
               .home=${this._home}
               .selected=${linking ? this._selected : NO_SELECTION}
+              .current=${linking ? this._current : undefined}
               mode=${linking ? 'link' : 'use'}
               @maxsen-element-tap=${this._onElementTap}
             ></maxsen-floorplan-view>
@@ -300,6 +298,7 @@ export class MaxsenHomePanel extends LitElement {
                     .home=${this._home}
                     .entryId=${this._entryId}
                     @maxsen-selection=${(e: CustomEvent<{ selected: string[] }>) => (this._selected = e.detail.selected)}
+                    @maxsen-current=${(e: CustomEvent<{ elementId?: string }>) => (this._current = e.detail.elementId)}
                     @maxsen-link-done=${this._closeInstaller}
                   ></maxsen-link-mode>`
                 : html`<maxsen-quick-panel .hass=${this.hass} .home=${this._home} .entryId=${this._entryId}>

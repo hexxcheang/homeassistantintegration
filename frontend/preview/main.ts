@@ -2,7 +2,7 @@ import '../src/maxsen-home-panel.ts';
 import type { MaxsenHomePanel } from '../src/maxsen-home-panel.ts';
 import type { HomePackage } from '../src/types.ts';
 import fixture from '../../tests/fixtures/home-v1.json';
-import { createFakeHass } from './fake-hass.ts';
+import { createFakeHass, ENTRY_ID } from './fake-hass.ts';
 import { PackageProblem, parseHomeFile } from './validate-package.ts';
 
 // Home Assistant's own menu button, which the narrow panel header uses.
@@ -30,6 +30,8 @@ const homeFile = byId<HTMLInputElement>('home-file');
 const plannerFile = byId<HTMLInputElement>('planner-file');
 const adminBox = byId<HTMLInputElement>('admin');
 const installerBox = byId<HTMLInputElement>('installer');
+const pressMenu = byId<HTMLSelectElement>('press');
+const unlinkAllButton = byId<HTMLButtonElement>('unlink-all');
 
 const fake = createFakeHass(fixture as unknown as HomePackage, {
   admin: adminBox.checked,
@@ -44,6 +46,30 @@ function say(text: string, isError = false): void {
 const sayLoaded = (title: string, how: string): void =>
   say(`Showing “${title}” ${how}. Tap a light or switch to try it.`);
 
+// ---- the Press a device menu ----
+
+/** The menu lists the fake devices and gangs; it is rebuilt only when that list changes, so an open menu stays open. */
+let pressMenuKey = '';
+function fillPressMenu(): void {
+  const targets = fake.pressTargets();
+  const key = JSON.stringify(targets);
+  if (key === pressMenuKey) return;
+  pressMenuKey = key;
+  const groups = new Map<string, HTMLOptGroupElement>();
+  const options: (HTMLOptionElement | HTMLOptGroupElement)[] = [new Option('Press a device…', '')];
+  for (const target of targets) {
+    let group = groups.get(target.group);
+    if (!group) {
+      group = document.createElement('optgroup');
+      group.label = target.group;
+      groups.set(target.group, group);
+      options.push(group);
+    }
+    group.append(new Option(target.label, target.entityId));
+  }
+  pressMenu.replaceChildren(...options);
+}
+
 // ---- the real panel, given the fake hass ----
 
 const panel = document.createElement('maxsen-home-panel') as MaxsenHomePanel;
@@ -54,7 +80,9 @@ const refreshHass = (): void => {
   panel.hass = { ...fake };
 };
 fake.onChange(refreshHass);
+fake.onChange(fillPressMenu);
 refreshHass();
+fillPressMenu();
 frame.append(panel);
 fake.startSimulation();
 sayLoaded('Test House', '(the sample home)');
@@ -76,6 +104,29 @@ for (const radio of document.querySelectorAll<HTMLInputElement>('input[name="fra
     panel.narrow = radio.value === 'phone';
   });
 }
+
+pressMenu.addEventListener('change', () => {
+  const entityId = pressMenu.value;
+  pressMenu.value = '';
+  if (!entityId) return;
+  const target = fake.pressTargets().find((t) => t.entityId === entityId);
+  fake.press(entityId);
+  say(`Pressed ${target?.label ?? entityId}; it is now ${fake.states[entityId]?.state ?? 'unknown'}.`);
+});
+
+unlinkAllButton.addEventListener('click', async () => {
+  try {
+    const { links } = await fake.callWS<{ links: Record<string, unknown> }>({ type: 'maxsen/home', entry_id: ENTRY_ID });
+    await fake.callWS({
+      type: 'maxsen/links/set',
+      entry_id: ENTRY_ID,
+      updates: Object.fromEntries(Object.keys(links).map((id) => [id, null])),
+    });
+    say('Every marker is unlinked. Open the Installer tools and start the linking walk.');
+  } catch (error) {
+    say(error instanceof Error ? error.message : 'Could not unlink.', true);
+  }
+});
 
 adminBox.addEventListener('change', () => fake.setAdmin(adminBox.checked));
 installerBox.addEventListener('change', () => fake.setInstallerMode(installerBox.checked));

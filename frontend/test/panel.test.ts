@@ -638,6 +638,47 @@ describe('installer tools in the panel', () => {
     expect(viewOf(panel).selected).toEqual([]);
   });
 
+  it('highlights the walk step on the drawing, and only while the walk is on', async () => {
+    const fake = fakeHass(undefined, linkable());
+    const panel = await mountPanel({ hass: fake.hass });
+    installerButton(panel)!.click();
+    await settle(panel);
+    expect(viewOf(panel).current).toBeUndefined();
+
+    const tools = linkModeOf(panel)!;
+    tools.shadowRoot!.querySelector<HTMLButtonElement>('.start-walk')!.click();
+    await settle(panel);
+    expect(viewOf(panel).current).toBe('cur1');
+
+    // Taps on the drawing reach the walk, which jumps to the element.
+    viewOf(panel).dispatchEvent(
+      new CustomEvent('maxsen-element-tap', { detail: { elementId: 'sw1' }, bubbles: true, composed: true }),
+    );
+    await settle(panel);
+    expect(viewOf(panel).current).toBe('sw1');
+
+    tools.shadowRoot!.querySelector<HTMLButtonElement>('.walk-stop')!.click();
+    await settle(panel);
+    expect(viewOf(panel).current).toBeUndefined();
+  });
+
+  it('drops the highlight when the installer tools are closed during a walk', async () => {
+    const fake = fakeHass(undefined, linkable());
+    const panel = await mountPanel({ hass: fake.hass });
+    installerButton(panel)!.click();
+    await settle(panel);
+    linkModeOf(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('.start-walk')!.click();
+    await settle(panel);
+    expect(viewOf(panel).current).toBe('cur1');
+    const before = fake.unsubscribe.mock.calls.length;
+
+    linkModeOf(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('.done')!.click();
+    await settle(panel);
+
+    expect(viewOf(panel).current).toBeUndefined();
+    expect(fake.unsubscribe.mock.calls.length).toBe(before + 1); // the identify prompt was ended
+  });
+
   it('leaves link mode when installer mode is switched off', async () => {
     const fake = fakeHass(undefined, linkable());
     const panel = await mountPanel({ hass: fake.hass });

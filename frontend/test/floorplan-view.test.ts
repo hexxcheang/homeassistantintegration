@@ -612,6 +612,60 @@ describe('link mode', () => {
     expect(group(view, 'dl2').querySelector('.halo')).not.toBeNull();
   });
 
+  it('draws a pulsing ring on the current element, a marker or a line, and on no other', async () => {
+    const view = await mountView({
+      hass: withImages(),
+      mode: 'link',
+      current: 'dl1',
+      home: homeResponse({ links: { dl1: LIGHT } }),
+    });
+    const ring = group(view, 'dl1').querySelector('.current-ring');
+    expect(ring?.tagName.toLowerCase()).toBe('circle');
+    expect(group(view, 'dl1').classList.contains('current')).toBe(true);
+    expect(group(view, 'dl2').querySelector('.current-ring')).toBeNull();
+
+    view.current = 'led1';
+    await settle(view);
+    expect(group(view, 'dl1').querySelector('.current-ring')).toBeNull();
+    expect(group(view, 'led1').querySelector('.current-ring')?.tagName.toLowerCase()).toBe('path');
+
+    view.current = undefined;
+    await settle(view);
+    expect(root(view).querySelector('.current-ring')).toBeNull();
+  });
+
+  it('does not pulse when the user prefers reduced motion', () => {
+    const css = (customElements.get('maxsen-floorplan-view') as unknown as { styles: { cssText: string } })
+      .styles.cssText;
+    expect(css).toMatch(/prefers-reduced-motion[^{]*\{[\s\S]*\.current-ring[\s\S]*animation:\s*none/);
+  });
+
+  it('shows the level and layer the current element is on', async () => {
+    const view = await mountView({
+      hass: withImages(),
+      mode: 'link',
+      home: homeResponse(),
+    });
+    buttonLabelled(view, 'Smart Home').click();
+    await settle(view);
+    expect(ids(view)).not.toContain('dl1');
+
+    view.current = 'dl1'; // a light, while only Smart Home is shown
+    await settle(view);
+    expect(ids(view)).toContain('dl1');
+    expect(buttonLabelled(view, 'All').getAttribute('aria-pressed')).toBe('true');
+
+    view.current = 'sen2'; // on Level 2
+    await settle(view);
+    expect(buttonLabelled(view, 'Level 2').getAttribute('aria-selected')).toBe('true');
+    expect(ids(view)).toEqual(['sen2']);
+
+    // The installer going back to look at another level is not undone until the current element changes.
+    buttonLabelled(view, 'Level 1').click();
+    await settle(view);
+    expect(buttonLabelled(view, 'Level 1').getAttribute('aria-selected')).toBe('true');
+  });
+
   it('draws a dashed ring on unlinked elements, and a red one on a missing device', async () => {
     const view = await mountView({
       hass: withImages(),

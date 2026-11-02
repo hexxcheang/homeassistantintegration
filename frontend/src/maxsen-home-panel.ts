@@ -14,6 +14,8 @@ const NO_SELECTION: string[] = [];
 /** How long to wait before loading again after a failed load or subscribe: 2 s, 5 s, 10 s, then every 30 s. */
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
 const RETRY_EVERY_MS = 30_000;
+const INSTALLER_CLOSED = 'Installer mode was switched off, so the installer tools closed.';
+const CLOSED_NOTICE_MS = 8_000;
 
 /**
  * Maxsen is not ready to answer yet (its entry is still loading, or its commands are not registered):
@@ -61,6 +63,7 @@ export class MaxsenHomePanel extends LitElement {
     _linking: { state: true },
     _selected: { state: true },
     _current: { state: true },
+    _closedNotice: { state: true },
   };
 
   declare hass: HassLike | undefined;
@@ -76,6 +79,9 @@ export class MaxsenHomePanel extends LitElement {
   declare private _selected: string[];
   /** The element the linking walk asks about, pulsing on the drawing. */
   declare private _current: string | undefined;
+  /** Shown for a while after installer mode was switched off under open installer tools. */
+  declare private _closedNotice: string | undefined;
+  private _closedNoticeTimer: ReturnType<typeof setTimeout> | undefined;
 
   private _entryId: string | undefined;
   /** The entry id the card or panel was configured with when the current run started, if any. */
@@ -118,6 +124,7 @@ export class MaxsenHomePanel extends LitElement {
     super.disconnectedCallback();
     this._observer?.disconnect();
     this._observer = undefined;
+    clearTimeout(this._closedNoticeTimer);
     this._listen(undefined);
     this._stop();
   }
@@ -145,7 +152,19 @@ export class MaxsenHomePanel extends LitElement {
   }
 
   override willUpdate(): void {
-    if (this._linking && !this._mayInstall()) this._closeInstaller();
+    if (this._linking && !this._mayInstall()) {
+      this._closeInstaller();
+      // The link tools (and any notice they were showing) are gone; say why here.
+      this._closedNotice = INSTALLER_CLOSED;
+      clearTimeout(this._closedNoticeTimer);
+      this._closedNoticeTimer = setTimeout(() => (this._closedNotice = undefined), CLOSED_NOTICE_MS);
+    }
+  }
+
+  private _openInstaller(): void {
+    clearTimeout(this._closedNoticeTimer);
+    this._closedNotice = undefined;
+    this._linking = true;
   }
 
   private _closeInstaller(): void {
@@ -301,9 +320,11 @@ export class MaxsenHomePanel extends LitElement {
                     @maxsen-current=${(e: CustomEvent<{ elementId?: string }>) => (this._current = e.detail.elementId)}
                     @maxsen-link-done=${this._closeInstaller}
                   ></maxsen-link-mode>`
-                : html`<maxsen-quick-panel .hass=${this.hass} .home=${this._home} .entryId=${this._entryId}>
+                : html`${this._closedNotice
+                      ? html`<p class="installer-closed" role="status">${this._closedNotice}</p>`
+                      : nothing}<maxsen-quick-panel .hass=${this.hass} .home=${this._home} .entryId=${this._entryId}>
                     ${this._mayInstall()
-                      ? html`<button slot="actions" class="installer" @click=${() => (this._linking = true)}>
+                      ? html`<button slot="actions" class="installer" @click=${this._openInstaller}>
                           Installer
                         </button>`
                       : nothing}
@@ -404,6 +425,14 @@ export class MaxsenHomePanel extends LitElement {
       font: inherit;
       font-size: 16px;
       cursor: pointer;
+    }
+    .installer-closed {
+      margin: 0 0 8px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: var(--secondary-background-color, #eef0f3);
+      font-size: 15px;
+      line-height: 1.4;
     }
     .message {
       margin: auto;

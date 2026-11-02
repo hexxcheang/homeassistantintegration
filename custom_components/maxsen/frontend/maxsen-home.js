@@ -3241,7 +3241,7 @@ var nr = class {
 		let r = e.attributes.supported_features;
 		return typeof r == "number" ? (r & t) !== 0 : n;
 	}
-}, rr = 5e3, ir = "Select lights together, or other devices together, not both.", ar = 2e3, or = "Two devices reacted. Press once more.", sr = "The walk stopped. Open Installer to carry on.", cr = "Identifying stopped: installer mode was switched off, or another phone is listening.", lr = "That device is already linked to another element. Press a different one.";
+}, rr = 5e3, ir = "Select lights together, or other devices together, not both.", ar = 2e3, or = "Two devices reacted. Press once more.", sr = "The walk stopped. Tap Start linking walk to carry on.", cr = "Identifying stopped: installer mode was switched off, or another phone is listening.", lr = "That device is already linked to another element. Press a different one.";
 function ur(e, t) {
 	return (typeof e == "object" && e && "code" in e ? e.code : void 0) === "already_linked" ? lr : m(e, t);
 }
@@ -4518,18 +4518,18 @@ var vr = 900, yr = [], br = [
 	2e3,
 	5e3,
 	1e4
-], xr = 3e4, Sr = class extends Error {};
-function Cr(e) {
+], xr = 3e4, Sr = "Installer mode was switched off, so the installer tools closed.", Cr = 8e3, wr = class extends Error {};
+function Tr(e) {
 	let t = typeof e == "object" && e ? e.code : void 0;
 	return t === "not_found" || t === "unknown_command";
 }
-function wr(e) {
+function Er(e) {
 	return br[e] ?? xr;
 }
-function Tr(e, t) {
+function Dr(e, t) {
 	return e >= vr && e > t ? "side" : "stacked";
 }
-var Er = class extends H {
+var Or = class extends H {
 	static properties = {
 		hass: { attribute: !1 },
 		narrow: { type: Boolean },
@@ -4540,8 +4540,10 @@ var Er = class extends H {
 		_layout: { state: !0 },
 		_linking: { state: !0 },
 		_selected: { state: !0 },
-		_current: { state: !0 }
+		_current: { state: !0 },
+		_closedNotice: { state: !0 }
 	};
+	_closedNoticeTimer;
 	_entryId;
 	_configuredEntryId;
 	_started = !1;
@@ -4557,11 +4559,11 @@ var Er = class extends H {
 	connectedCallback() {
 		super.connectedCallback(), typeof ResizeObserver < "u" && (this._observer = new ResizeObserver((e) => {
 			let t = e[0]?.contentRect;
-			t && (this._layout = Tr(t.width, t.height));
+			t && (this._layout = Dr(t.width, t.height));
 		}), this._observer.observe(this)), this.hass && this._listen(this.hass.connection);
 	}
 	disconnectedCallback() {
-		super.disconnectedCallback(), this._observer?.disconnect(), this._observer = void 0, this._listen(void 0), this._stop();
+		super.disconnectedCallback(), this._observer?.disconnect(), this._observer = void 0, clearTimeout(this._closedNoticeTimer), this._listen(void 0), this._stop();
 	}
 	_onReconnect = () => {
 		this._started && (this._attempt = 0, this._resubscribe());
@@ -4573,7 +4575,10 @@ var Er = class extends H {
 		return !!(this.hass?.user?.is_admin && this._home?.installer_mode);
 	}
 	willUpdate() {
-		this._linking && !this._mayInstall() && this._closeInstaller();
+		this._linking && !this._mayInstall() && (this._closeInstaller(), this._closedNotice = Sr, clearTimeout(this._closedNoticeTimer), this._closedNoticeTimer = setTimeout(() => this._closedNotice = void 0, Cr));
+	}
+	_openInstaller() {
+		clearTimeout(this._closedNoticeTimer), this._closedNotice = void 0, this._linking = !0;
 	}
 	_closeInstaller() {
 		this._linking = !1, this._selected = [], this._current = void 0;
@@ -4604,12 +4609,12 @@ var Er = class extends H {
 					this._entryId = void 0, this._status = "none";
 					return;
 				}
-				if (i.state !== "loaded") throw new Sr(`Maxsen is ${i.state}`);
+				if (i.state !== "loaded") throw new wr(`Maxsen is ${i.state}`);
 				r = i.entryId;
 			}
 			this._entryId = r;
 			let i = await _e(t, r).catch((e) => {
-				throw Cr(e) ? new Sr("Maxsen is not answering yet") : e;
+				throw Tr(e) ? new wr("Maxsen is not answering yet") : e;
 			});
 			if (n !== this._run) return;
 			this._home = i, this._status = "ready";
@@ -4621,9 +4626,9 @@ var Er = class extends H {
 			this._unsubscribe = a, this._attempt = 0;
 		} catch (t) {
 			if (n !== this._run) return;
-			e && this._home || (this._status = t instanceof Sr && this._attempt < br.length ? "starting" : "error"), this._retryTimer = setTimeout(() => {
+			e && this._home || (this._status = t instanceof wr && this._attempt < br.length ? "starting" : "error"), this._retryTimer = setTimeout(() => {
 				this._retryTimer = void 0, n === this._run && this._resubscribe();
-			}, wr(this._attempt++));
+			}, Er(this._attempt++));
 		}
 	}
 	async _reload(e) {
@@ -4668,8 +4673,8 @@ var Er = class extends H {
                     @maxsen-selection=${(e) => this._selected = e.detail.selected}
                     @maxsen-current=${(e) => this._current = e.detail.elementId}
                     @maxsen-link-done=${this._closeInstaller}
-                  ></maxsen-link-mode>` : N`<maxsen-quick-panel .hass=${this.hass} .home=${this._home} .entryId=${this._entryId}>
-                    ${this._mayInstall() ? N`<button slot="actions" class="installer" @click=${() => this._linking = !0}>
+                  ></maxsen-link-mode>` : N`${this._closedNotice ? N`<p class="installer-closed" role="status">${this._closedNotice}</p>` : I}<maxsen-quick-panel .hass=${this.hass} .home=${this._home} .entryId=${this._entryId}>
+                    ${this._mayInstall() ? N`<button slot="actions" class="installer" @click=${this._openInstaller}>
                           Installer
                         </button>` : I}
                   </maxsen-quick-panel>`}
@@ -4761,6 +4766,14 @@ var Er = class extends H {
       font-size: 16px;
       cursor: pointer;
     }
+    .installer-closed {
+      margin: 0 0 8px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: var(--secondary-background-color, #eef0f3);
+      font-size: 15px;
+      line-height: 1.4;
+    }
     .message {
       margin: auto;
       padding: 32px 24px;
@@ -4784,9 +4797,9 @@ var Er = class extends H {
     }
   `;
 };
-customElements.get("maxsen-home-panel") || customElements.define("maxsen-home-panel", Er);
+customElements.get("maxsen-home-panel") || customElements.define("maxsen-home-panel", Or);
 // src/maxsen-floorplan-card.ts
-var Dr = class extends H {
+var kr = class extends H {
 	static properties = {
 		hass: { attribute: !1 },
 		_panel: { state: !0 }
@@ -4819,10 +4832,10 @@ var Dr = class extends H {
     }
   `;
 };
-customElements.get("maxsen-floorplan-card") || customElements.define("maxsen-floorplan-card", Dr), window.customCards = window.customCards ?? [], window.customCards.some((e) => e.type === "maxsen-floorplan-card") || window.customCards.push({
+customElements.get("maxsen-floorplan-card") || customElements.define("maxsen-floorplan-card", kr), window.customCards = window.customCards ?? [], window.customCards.some((e) => e.type === "maxsen-floorplan-card") || window.customCards.push({
 	type: "maxsen-floorplan-card",
 	name: "Maxsen floor plan",
 	description: "The floor plans of your Maxsen home, with live device state.",
 	preview: !1
 });
-export { _ as LIGHTING_CATEGORIES, Dr as MaxsenFloorplanCard, mn as MaxsenFloorplanView, Er as MaxsenHomePanel, _r as MaxsenLinkMode, Mn as MaxsenQuickPanel, we as createStarterScenes, ge as findEntry, _e as getHome, ye as identify, Tr as layoutFor, he as linkCandidates, Te as loadImage, Ce as refreshApply, Se as refreshPreview, wr as retryDelay, u as sceneToSvg, xe as setDisplay, v as setLinks, be as setQuickPanel, ve as subscribe, gr as summaryLine, Ee as uploadHomeFile, g as visualState };
+export { _ as LIGHTING_CATEGORIES, kr as MaxsenFloorplanCard, mn as MaxsenFloorplanView, Or as MaxsenHomePanel, _r as MaxsenLinkMode, Mn as MaxsenQuickPanel, we as createStarterScenes, ge as findEntry, _e as getHome, ye as identify, Dr as layoutFor, he as linkCandidates, Te as loadImage, Ce as refreshApply, Se as refreshPreview, Er as retryDelay, u as sceneToSvg, xe as setDisplay, v as setLinks, be as setQuickPanel, ve as subscribe, gr as summaryLine, Ee as uploadHomeFile, g as visualState };

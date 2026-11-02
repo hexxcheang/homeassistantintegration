@@ -135,7 +135,7 @@ checklist*, step 1).
 - Outside the walk you can do one element at a time: tap it and press the device. For an element
   that is already linked, tap **Press to relink** first.
 - Only one phone can run the walk at a time. When a second phone starts listening, the first one
-  stops with "The walk stopped. Open Installer to carry on."
+  stops with "The walk stopped. Tap Start linking walk to carry on."
 - Only Zigbee devices (Zigbee2MQTT or ZHA) are noticed. Switch on **Include other devices** only
   for an install that does not use Zigbee.
 

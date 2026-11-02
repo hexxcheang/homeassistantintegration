@@ -693,6 +693,37 @@ describe('installer tools in the panel', () => {
     expect(linkModeOf(panel)).toBeNull();
     expect(viewOf(panel).mode).toBe('use');
     expect(installerButton(panel)).toBeNull();
+    expect(panel.shadowRoot!.querySelector('.installer-closed')?.textContent?.trim()).toBe(
+      'Installer mode was switched off, so the installer tools closed.',
+    );
+  });
+
+  it('says nothing when the installer tools are closed with Done', async () => {
+    const fake = fakeHass(undefined, linkable());
+    const panel = await mountPanel({ hass: fake.hass });
+    installerButton(panel)!.click();
+    await settle(panel);
+    linkModeOf(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('.done')!.click();
+    await settle(panel);
+    expect(panel.shadowRoot!.querySelector('.installer-closed')).toBeNull();
+  });
+
+  it('clears the installer-off message when Installer is opened again', async () => {
+    const fake = fakeHass(undefined, linkable());
+    const panel = await mountPanel({ hass: fake.hass });
+    installerButton(panel)!.click();
+    await settle(panel);
+    fake.setHome(homeResponse({ installer_mode: false }));
+    fake.deliver('home');
+    await settle(panel);
+    fake.setHome(linkable());
+    fake.deliver('home');
+    await settle(panel);
+    installerButton(panel)!.click();
+    await settle(panel);
+    linkModeOf(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('.done')!.click();
+    await settle(panel);
+    expect(panel.shadowRoot!.querySelector('.installer-closed')).toBeNull();
   });
 
   it('leaves link mode when the user stops being an administrator', async () => {

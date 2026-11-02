@@ -31,7 +31,7 @@ const MIXED_KINDS = 'Select lights together, or other devices together, not both
 /** How long "Linked: …" stays, with its Undo, before the walk moves on. */
 const TOAST_MS = 2000;
 const AMBIGUOUS = 'Two devices reacted. Press once more.';
-const WALK_STOPPED = 'The walk stopped. Open Installer to carry on.';
+const WALK_STOPPED = 'The walk stopped. Tap Start linking walk to carry on.';
 const IDENTIFY_STOPPED = 'Identifying stopped: installer mode was switched off, or another phone is listening.';
 const ALREADY_LINKED = 'That device is already linked to another element. Press a different one.';
 

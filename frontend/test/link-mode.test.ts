@@ -1494,7 +1494,7 @@ describe('linking walk', () => {
       await w.tick();
 
       expect(root(w.el as HTMLElement).querySelector('.walk')).toBeNull();
-      expect(text(q(w.el, '.notice.error'))).toBe('The walk stopped. Open Installer to carry on.');
+      expect(text(q(w.el, '.notice.error'))).toBe('The walk stopped. Tap Start linking walk to carry on.');
       expect(w.current.at(-1)).toBeUndefined();
       expect(sub.unsub).toHaveBeenCalledTimes(1);
       expect(q<HTMLButtonElement>(w.el, '.start-walk').disabled).toBe(false);
@@ -1925,7 +1925,7 @@ describe('when the same home is listened to twice', () => {
     latest(w).deliver({ stopped: true });
     await w.tick();
     expect(root(w.el as HTMLElement).querySelector('.walk')).toBeNull();
-    expect(text(q(w.el, '.notice.error'))).toBe('The walk stopped. Open Installer to carry on.');
+    expect(text(q(w.el, '.notice.error'))).toBe('The walk stopped. Tap Start linking walk to carry on.');
   });
 });
 

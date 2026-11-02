@@ -999,6 +999,27 @@ function wifiPlug(fake: FakeHass): { deviceId: string; entityId: string } {
   return { deviceId: device.id, entityId: entity.entity_id };
 }
 
+describe('the gangs a fake switch has', () => {
+  const gangsOf = async (product: string, variant: string): Promise<number> => {
+    const pkg = fresh();
+    const sw = pkg.levels.flatMap((l) => l.plans.flatMap((p) => p.elements)).find((e) => e.id === 'sw1')!;
+    sw.productName = product;
+    sw.variantName = variant;
+    const fake = createFakeHass(pkg, admin);
+    const { id } = (await getHome(fake)).links['sw1']!;
+    return Object.values(fake.entities).filter(
+      (e) => e.device_id === id && e.entity_id.startsWith('switch.') && !e.entity_category,
+    ).length;
+  };
+
+  it('reads the count as the walk does and does not stop at three', async () => {
+    expect(await gangsOf('Ark Series', '4-gang, White')).toBe(4);
+    expect(await gangsOf('S1 3G', 'White')).toBe(3);
+    expect(await gangsOf('Nova 5 Gang', '')).toBe(5);
+    expect(await gangsOf('Ark Series', 'White')).toBe(1);
+  });
+});
+
 describe('maxsen/identify/subscribe', () => {
   it('reports the device whose button was pressed after the subscription, once the window has passed', async () => {
     vi.useFakeTimers();

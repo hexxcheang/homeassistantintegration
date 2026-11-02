@@ -6,6 +6,7 @@
  */
 import type { HomeEvent } from '../src/api.ts';
 import { LIGHTING_CATEGORIES } from '../src/link-candidates.ts';
+import { gangCount as statedGangs } from '../src/walk.ts';
 import { PackageProblem, type PackageReason, parseHomeFile } from './validate-package.ts';
 import type {
   ChangedDrawing,
@@ -265,10 +266,9 @@ function uniqueDeviceName(world: World, wanted: string): string {
   return name;
 }
 
-/** "3-gang" in the variant name gives three switches; at most three, at least one. */
+/** The gangs a switch has: the count its names state ("3 Gang", "3-gang", "3G", read as the walk reads it), else one. */
 function gangCount(el: HomeElement): number {
-  const match = /(\d+)\s*-?\s*gang/i.exec(`${el.variantName} ${el.productName}`);
-  return Math.min(3, Math.max(1, match ? Number(match[1]) : 1));
+  return Math.max(1, statedGangs(el.productName, el.variantName) ?? 1);
 }
 
 /** One fake device for a non-lighting element, with the entities its category would have. */

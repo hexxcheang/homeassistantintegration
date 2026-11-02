@@ -24,7 +24,7 @@ const GANG_PATTERN = /(\d+)\s*-?\s*g(?:ang)?\b/i;
 const PICK_PROMPT = 'Pick it from the list';
 
 /** The count the product name states, else the variant name ("Ark Series" + "3-gang, White"). */
-function gangCount(productName: string, variantName: string): number | null {
+export function gangCount(productName: string, variantName: string): number | null {
   const match = GANG_PATTERN.exec(productName) ?? GANG_PATTERN.exec(variantName);
   return match ? Number(match[1]) : null;
 }

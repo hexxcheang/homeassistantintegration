@@ -107,8 +107,8 @@ checklist*, step 1).
    only tell a light press by a gang going from off to on.
 5. **Link the devices.** Open **Home**, tap **Installer**, then **Start linking walk**. The bar shows
    what to do for each element, level by level. Do it and the app links it and moves on. For lights,
-   press the gang that turns them on, then tap the other lights that came on, then tap **Link these
-   lights**.
+   turn its gangs off (an earlier switch step may have turned them on), then press the gang that
+   turns this on, then tap the other lights that came on, then tap **Link these lights**.
 6. **Check all.** Tap **Check all** and watch the home (see *Check all* below). Tap **OK** or
    **Wrong** for each one.
 7. **Finish.** Tap **Create starter scenes**, add a non-admin user for each wall panel, then switch
@@ -119,7 +119,7 @@ checklist*, step 1).
 | Kind of device | What you do |
 | --- | --- |
 | Switch or control panel | "Press any button on the switch at ‹name›" |
-| Lights | "Press the gang that turns this on", then "Tap the other lights that came on" |
+| Lights | "Turn its gangs off, then press the gang that turns this on", then "Tap the other lights that came on" |
 | Curtain | "Press open or close on the curtain switch" |
 | Sensor | "Wave at the sensor, or open the door it's on" |
 | Aircon, camera, lock, other | "Pick it from the list": tap the device in the list below (use **Search by name or room**) |

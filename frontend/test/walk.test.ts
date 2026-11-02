@@ -178,7 +178,7 @@ describe('buildQueue', () => {
       'Press open or close on the curtain switch',
       "Wave at the sensor, or open the door it's on",
       'Pick it from the list',
-      'Press the gang that turns this on',
+      'Turn its gangs off, then press the gang that turns this on',
     ]);
   });
 

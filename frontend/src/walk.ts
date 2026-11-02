@@ -41,7 +41,7 @@ export function stepFor(el: HomeElement): WalkStep {
     return {
       kind: 'lights',
       elementId: id,
-      prompt: 'Press the gang that turns this on',
+      prompt: 'Turn its gangs off, then press the gang that turns this on',
       mode: 'entity',
       kinds: ['light_gang'],
     };

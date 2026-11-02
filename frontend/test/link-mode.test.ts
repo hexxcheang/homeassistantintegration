@@ -1048,7 +1048,7 @@ describe('linking walk', () => {
       w.el.tap('dl2');
       await w.tick();
       expect(w.current.at(-1)).toBe('dl2');
-      expect(prompt(w)).toBe('Press the gang that turns this on');
+      expect(prompt(w)).toBe('Turn its gangs off, then press the gang that turns this on');
 
       w.el.tap('sen1'); // already linked
       w.el.tap('note1'); // not an element
@@ -1158,7 +1158,7 @@ describe('linking walk', () => {
     it('listens for a gang, and links the highlighted light to the entity that came on without naming anything', async () => {
       const w = await mountWalk();
       await startAtLight(w);
-      expect(prompt(w)).toBe('Press the gang that turns this on');
+      expect(prompt(w)).toBe('Turn its gangs off, then press the gang that turns this on');
       expect(latest(w).msg).toEqual(identifyMessage({ mode: 'entity', kinds: ['light_gang'] }));
       const sub = latest(w);
 
@@ -1211,7 +1211,7 @@ describe('linking walk', () => {
       await w.tick(2100);
 
       expect(w.current.at(-1)).toBe('dl3');
-      expect(prompt(w)).toBe('Press the gang that turns this on');
+      expect(prompt(w)).toBe('Turn its gangs off, then press the gang that turns this on');
       expect(latest(w).msg).toEqual(identifyMessage({ mode: 'entity', kinds: ['light_gang'] }));
     });
 
@@ -1251,7 +1251,7 @@ describe('linking walk', () => {
         updates: { dl1: null, dl3: GANG1 },
       });
       expect(w.links).toEqual({ dl3: GANG1 });
-      expect(prompt(w)).toBe('Press the gang that turns this on');
+      expect(prompt(w)).toBe('Turn its gangs off, then press the gang that turns this on');
       expect(w.current.at(-1)).toBe('dl1');
     });
 
@@ -1275,7 +1275,7 @@ describe('linking walk', () => {
       click(q(w.el, '.walk-undo'));
       await w.tick();
       expect(linkCalls(w).at(-1)).toEqual({ type: 'maxsen/links/set', entry_id: 'e1', updates: { dl1: null } });
-      expect(prompt(w)).toBe('Press the gang that turns this on');
+      expect(prompt(w)).toBe('Turn its gangs off, then press the gang that turns this on');
       expect(w.selections.at(-1)).toEqual([]);
       expect(latest(w).msg).toEqual(identifyMessage({ mode: 'entity', kinds: ['light_gang'] }));
     });
@@ -2122,7 +2122,7 @@ describe('Check all', () => {
       click(q(w.el, '.check-close'));
       await w.tick();
       expect(w.current.at(-1)).toBe('dl3');
-      expect(text(q(w.el, '.walk-prompt'))).toBe('Press the gang that turns this on');
+      expect(text(q(w.el, '.walk-prompt'))).toBe('Turn its gangs off, then press the gang that turns this on');
       expect(text(q(w.el, '.walk-progress'))).toBe('3 / 8 linked');
       expect(latest(w).msg).toEqual(identifyMessage({ mode: 'entity', kinds: ['light_gang'] }));
     });
@@ -2141,7 +2141,7 @@ describe('Check all', () => {
       await w.tick();
       expect(w.subs).toHaveLength(2);
       expect(w.current.at(-1)).toBe('dl3');
-      expect(prompt(w)).toBe('Press the gang that turns this on');
+      expect(prompt(w)).toBe('Turn its gangs off, then press the gang that turns this on');
       expect(text(q(w.el, '.walk-progress'))).toBe('3 / 8 linked');
 
       // The walk still has what it had: skipping the lights goes on to the rest.

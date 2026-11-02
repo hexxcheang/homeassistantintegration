@@ -74,7 +74,7 @@ Lights come after the switches of the same level. Skipped markers come back at t
 ## Decisions from the builder check *(Claude's calls; the owner can override)*
 
 1. **Lights are linked in groups the installer confirms.**
-   - The walk highlights one unlinked light marker and asks "Press the gang that turns this on".
+   - The walk highlights one unlinked light marker and asks "Turn its gangs off, then press the gang that turns this on".
    - The first matching gang that turns **on** (off → on) is linked to that marker.
    - The prompt then changes to "Tap the other lights that came on". The installer taps the lit
      markers they can see and confirms, and all of them are linked to the same gang.

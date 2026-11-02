@@ -558,6 +558,16 @@ export function createFakeHass(
       for (const id of entityIdsOf(data, target)) act(world, id, actions[service] as Action);
     } else if (domain === 'scene' && service === 'turn_on') {
       for (const id of entityIdsOf(data, target)) activateScene(world, id);
+    } else if (domain === 'cover' && service === 'stop_cover') {
+      // Covers jump to their end here, so there is nothing to stop; the call is still valid.
+    } else if (domain === 'cover' && service === 'set_cover_position') {
+      const position = data?.['position'];
+      if (typeof position !== 'number' || !Number.isFinite(position) || position < 0 || position > 100) {
+        throw new CommandError('invalid_format', 'position must be a number from 0 to 100.');
+      }
+      for (const id of entityIdsOf(data, target)) {
+        if (domainOf(id) === 'cover') setStates(world, id, position === 0 ? 'closed' : 'open', { current_position: position });
+      }
     } else {
       throw new CommandError('service_not_found', `Service ${domain}.${service} not found.`);
     }

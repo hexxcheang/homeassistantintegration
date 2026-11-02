@@ -11,6 +11,7 @@ import {
   setLinks,
   uploadHomeFile,
 } from './api.ts';
+import { CheckAll, type CheckStep } from './check-all.ts';
 import { errorMessage, linkName, release } from './hass-util.ts';
 import { LIGHTING_CATEGORIES, linkCandidates } from './link-candidates.ts';
 import type {
@@ -33,6 +34,7 @@ const AMBIGUOUS = 'Two devices reacted. Press once more.';
 const WALK_STOPPED = 'The walk stopped. Open Installer to carry on.';
 const IDENTIFY_STOPPED = 'Identifying stopped because installer mode was switched off.';
 const OTHER_LIGHTS = 'Tap the other lights that came on';
+const NOTHING_TO_CHECK = 'Nothing to check yet. Link a switch, light or curtain first.';
 
 /** The steps that wait for a press (the others are picked from a list). */
 type PressStep = Exclude<WalkStep, { kind: 'pick' }>;
@@ -43,6 +45,31 @@ type PressStep = Exclude<WalkStep, { kind: 'pick' }>;
  * `linked` while "Linked: …" and its Undo show.
  */
 type WalkPhase = 'waiting' | 'linking' | 'others' | 'linked';
+
+/**
+ * Where Check all is on its current step: `running` while the load is switched and put back,
+ * `asking` for OK or Wrong, `problem` when the step could not be run (Again or Skip), `summary`
+ * at the end, `ending` while a step that was running is being put back.
+ */
+type CheckPhase = 'running' | 'asking' | 'problem' | 'summary' | 'ending';
+
+/** One Check all, from the button to its summary. */
+interface Check {
+  all: CheckAll;
+  steps: CheckStep[];
+  index: number;
+  phase: CheckPhase;
+  /** Steps marked OK, Wrong, and left untested (unavailable, or skipped after a failure). */
+  ok: number;
+  wrong: number;
+  untested: number;
+  /** The elements Wrong unlinked, which go back in the walk. */
+  wrongElements: string[];
+  /** Why the step could not be run (phase `problem`). */
+  problem?: string;
+  /** Bumped whenever a step is started or the check is stopped, so a late answer can tell. */
+  token: number;
+}
 
 /** What was linked on this step, for the "Linked: …" toast and its Undo. */
 interface Toast {
@@ -125,6 +152,7 @@ export class MaxsenLinkMode extends LitElement {
     _ambiguous: { state: true },
     _includeOther: { state: true },
     _armed: { state: true },
+    _check: { state: true },
   };
 
   declare hass: HassLike | undefined;
@@ -147,6 +175,8 @@ export class MaxsenLinkMode extends LitElement {
   declare private _includeOther: boolean;
   /** The press of the one selected marker is being listened for (outside the walk): on for an unlinked marker, off until asked for a linked one. */
   declare private _armed: boolean;
+  /** Check all, when it is open. Mutable: call `requestUpdate()` after changing it. */
+  declare private _check: Check | undefined;
 
   private _known = new Map<string, Known>();
   /** Bumped when the dialog is closed, so an answer that arrives later does not reopen it. */
@@ -159,6 +189,8 @@ export class MaxsenLinkMode extends LitElement {
   private _listenToken = 0;
   /** What the single-marker press is listening for ('' for nothing), to subscribe only on a change. */
   private _singleKey = '';
+  /** The subscription being set up, if any; settles once it is in place (or has failed) and any stale one is released. */
+  private _subscribing: Promise<void> = Promise.resolve();
   /** The one marker the press listening is about, to arm it afresh when another is selected. */
   private _singleFor: string | undefined;
   /** Links this element wrote that the home it was given may not show yet; see `_walkHome`. */
@@ -192,6 +224,13 @@ export class MaxsenLinkMode extends LitElement {
     // Nothing may listen or move on for an element that is gone.
     this._stopListening();
     this._clearToast();
+    // A load that is switched goes back now, wherever the installer went.
+    const check = this._check;
+    this._check = undefined;
+    if (check) {
+      check.token++;
+      void check.all.abort();
+    }
     this._walk = undefined;
     this._group = undefined;
     this._armed = false;
@@ -201,7 +240,10 @@ export class MaxsenLinkMode extends LitElement {
   }
 
   override willUpdate(changed: Map<PropertyKey, unknown>): void {
-    if (changed.has('hass')) this._bindConnection();
+    if (changed.has('hass')) {
+      this._bindConnection();
+      if (this._check && this.hass) this._check.all.hass = this.hass;
+    }
     if (!changed.has('home')) return;
     this._known = new Map(
       (this.home?.package?.levels ?? []).flatMap((level) =>
@@ -217,7 +259,12 @@ export class MaxsenLinkMode extends LitElement {
   }
 
   override updated(): void {
-    const current = this._walk?.current?.elementId;
+    const check = this._check;
+    const current = check
+      ? check.phase === 'summary' || check.phase === 'ending'
+        ? undefined
+        : check.steps[check.index]?.elementIds[0]
+      : this._walk?.current?.elementId;
     if (current === this._announced) return;
     this._announced = current;
     this.dispatchEvent(
@@ -230,7 +277,7 @@ export class MaxsenLinkMode extends LitElement {
   /** An element was tapped on the drawing (or chosen from the list). */
   tap(elementId: string): void {
     const tapped = this._known.get(elementId)?.el;
-    if (!tapped) return;
+    if (!tapped || this._check) return; // Check all highlights what it switches; taps wait
     if (this._walk) {
       this._tapInWalk(tapped);
       return;
@@ -344,10 +391,12 @@ export class MaxsenLinkMode extends LitElement {
   /** Listen for what the installer presses; any earlier subscription ends first. */
   private _listen(options: IdentifyOptions, onResult: (result: IdentifyResult) => void): void {
     this._stopListening();
+    // Nothing listens while Check all switches loads: its toggles are not presses.
+    if (this._check) return;
     const { hass, entryId } = this;
     if (!hass || !entryId) return;
     const token = this._listenToken;
-    identify(hass, entryId, options, (result) => {
+    this._subscribing = identify(hass, entryId, options, (result) => {
       if (token === this._listenToken) onResult(result);
     }).then(
       (stop) => {
@@ -413,6 +462,7 @@ export class MaxsenLinkMode extends LitElement {
    * "Press to relink" for a linked one, so a light switched by someone else cannot overwrite a link.
    */
   private _syncSingle(): void {
+    if (this._check) return; // Check all does not listen; `_startCheck` and `_endCheck` set this right
     const only = !this._walk && !this._multi && this._selected.length === 1 ? this._selected[0] : undefined;
     if (only !== this._singleFor) {
       this._singleFor = only;
@@ -468,16 +518,18 @@ export class MaxsenLinkMode extends LitElement {
 
   // ---- the linking walk ----
 
-  private _startWalk(): void {
-    const home = this.home;
+  /** Start a walk over everything still unlinked, at `first` when it is one of them (after Check all). */
+  private _startWalk(first?: string): void {
+    const home = this._walkHome();
     if (!home || this._walk) return;
     const walk = new Walk(home);
     if (!walk.current) {
       this._say('Every element is linked.', false);
       return;
     }
+    if (first) walk.jump(first);
     this._walk = walk;
-    this._expected.clear();
+    if (!first) this._expected.clear(); // after Check all they stay until the home shows what it unlinked
     this._select([]); // ends a single press that was on
     this._beginStep();
   }
@@ -711,11 +763,182 @@ export class MaxsenLinkMode extends LitElement {
     }
     const walk = this._walk;
     // While a press is being saved or confirmed the walk stays where it is; it follows at the next step.
-    if (!walk || this._phase !== 'waiting') return;
+    // Check all keeps it still too, and brings it up to date when it ends.
+    if (!walk || this._phase !== 'waiting' || this._check) return;
     const before = walk.current?.elementId;
     const planned = this._walkHome();
     if (planned) walk.refresh(planned);
     if (walk.current?.elementId !== before || !walk.current) this._beginStep();
+  }
+
+  // ---- Check all ----
+
+  /** Check all can start: not while a press is being saved or confirmed, and not twice. */
+  private _canCheck(): boolean {
+    return (
+      Boolean(this.home?.package) &&
+      !this._check &&
+      !this._busy &&
+      (!this._walk || this._phase === 'waiting')
+    );
+  }
+
+  /**
+   * Go through everything linked that can be switched, one at a time (see `CheckAll`). Nothing
+   * listens for a press meanwhile, so its toggles cannot be taken for one; a walk that was on
+   * waits and listens again when Check all is over.
+   */
+  private async _startCheck(): Promise<void> {
+    const { hass } = this;
+    const home = this._walkHome();
+    if (!hass || !home || !this._canCheck()) return;
+    const all = new CheckAll(hass, home);
+    const steps = all.steps();
+    if (steps.length === 0) {
+      this._say(NOTHING_TO_CHECK, false);
+      return;
+    }
+    const check: Check = {
+      all,
+      steps,
+      index: 0,
+      phase: 'running',
+      ok: 0,
+      wrong: 0,
+      untested: 0,
+      wrongElements: [],
+      token: 0,
+    };
+    this._check = check; // before anything else: a second press of the button, and `_listen`, see it
+    this._stopListening();
+    this._armed = false;
+    this._singleKey = '';
+    this._singleFor = undefined;
+    this._ambiguous = false;
+    this._select([]);
+    // A subscription still being set up is released first, so nothing is switched while it could hear.
+    await this._subscribing;
+    if (this._check === check) void this._runCheckStep();
+  }
+
+  /** The step Check all is on: highlight it, switch it, put it back, and ask. */
+  private async _runCheckStep(): Promise<void> {
+    const check = this._check;
+    if (!check) return;
+    // What Wrong unlinked (or anyone else did) is not asked about again.
+    const links = this._walkHome()?.links ?? {};
+    while (check.index < check.steps.length && check.steps[check.index]!.elementIds.every((id) => !links[id])) {
+      check.index++;
+    }
+    const step = check.steps[check.index];
+    if (!step) {
+      check.phase = 'summary';
+      this._select([]);
+      this.requestUpdate();
+      return;
+    }
+    const token = ++check.token;
+    check.phase = 'running';
+    check.problem = undefined;
+    this._select(step.elementIds);
+    this.requestUpdate();
+    const outcome = await check.all.run(step);
+    if ('restored' in outcome && !outcome.restored && this.isConnected) {
+      this._say(`Could not put ${step.label} back. Check it by hand.`, true);
+    }
+    if (this._check !== check || check.token !== token) return;
+    if (outcome.status === 'done') {
+      check.phase = 'asking';
+    } else if (outcome.status === 'unavailable') {
+      check.phase = 'problem';
+      check.problem = `${step.label} is unavailable, so it was not switched.`;
+    } else if (outcome.status === 'failed') {
+      check.phase = 'problem';
+      check.problem = `Could not switch ${step.label}: ${outcome.message}`;
+    } else {
+      return; // cancelled or busy: whoever did that is moving on
+    }
+    this.requestUpdate();
+  }
+
+  private _checkOk(): void {
+    const check = this._check;
+    if (!check || check.phase !== 'asking') return;
+    check.ok++;
+    check.index++;
+    void this._runCheckStep();
+  }
+
+  /** Wrong: unlink what the step is linked to (the server puts names back) and go on; the walk takes them at the end. */
+  private async _checkWrong(): Promise<void> {
+    const { hass, entryId } = this;
+    const check = this._check;
+    const step = check?.steps[check.index];
+    if (!hass || !entryId || !check || !step || check.phase !== 'asking' || this._busy) return;
+    const links = this._walkHome()?.links ?? {};
+    const ids = step.elementIds.filter((id) => links[id]);
+    this._busy = true;
+    try {
+      if (ids.length > 0) await setLinks(hass, entryId, Object.fromEntries(ids.map((id) => [id, null])));
+    } catch (err) {
+      this._say(errorMessage(err, 'Could not unlink. Try again.'), true);
+      return;
+    } finally {
+      this._busy = false;
+    }
+    for (const id of ids) this._expected.set(id, null);
+    if (this._check !== check) return;
+    check.wrong++;
+    check.wrongElements.push(...ids);
+    check.index++;
+    void this._runCheckStep();
+  }
+
+  private _checkAgain(): void {
+    const check = this._check;
+    if (!check || (check.phase !== 'asking' && check.phase !== 'problem')) return;
+    void this._runCheckStep();
+  }
+
+  private _checkSkip(): void {
+    const check = this._check;
+    if (!check || check.phase !== 'problem') return;
+    check.untested++;
+    check.index++;
+    void this._runCheckStep();
+  }
+
+  private _checkSummary(check: Check): string {
+    const base = `${check.ok} OK, ${check.wrong} to relink`;
+    return check.untested > 0 ? `${base}, ${check.untested} not tested` : base;
+  }
+
+  /**
+   * Close Check all (Close, Relink now, or Stop): a step that is running is put back first, and
+   * only then does the walk listen again. What was marked Wrong goes back in the walk: a walk that
+   * was on gets them and moves to the first; otherwise one starts.
+   */
+  private async _endCheck(stopped = false): Promise<void> {
+    const check = this._check;
+    if (!check || check.phase === 'ending') return;
+    check.phase = 'ending';
+    check.token++;
+    this.requestUpdate();
+    await check.all.abort();
+    if (this._check !== check) return; // link mode was closed meanwhile
+    this._check = undefined;
+    this._select([]);
+    const [first] = check.wrongElements;
+    const walk = this._walk;
+    if (walk) {
+      const home = this._walkHome();
+      if (home) walk.refresh(home);
+      if (first) walk.jump(first);
+      this._beginStep();
+    } else if (first) {
+      this._startWalk(first);
+    }
+    if (stopped) this._say(`Check all stopped. ${this._checkSummary(check)}.`, false);
   }
 
   // ---- background ----
@@ -1071,59 +1294,112 @@ export class MaxsenLinkMode extends LitElement {
     </section>`;
   }
 
+  /** Check all: which step, what to watch, then OK or Wrong; at the end the summary. */
+  private _renderCheck(): TemplateResult | typeof nothing {
+    const check = this._check;
+    if (!check) return nothing;
+    const step = check.steps[check.index];
+    const phase = check.phase;
+    const summary = phase === 'summary';
+    return html`<section class="check" aria-label="Check all">
+      <div class="check-head">
+        <span class="check-progress">${summary ? 'Done' : `${check.index + 1} / ${check.steps.length}`}</span>
+        ${summary
+          ? nothing
+          : html`<button class="check-stop" ?disabled=${phase === 'ending' || this._busy} @click=${() => void this._endCheck(true)}>Stop</button>`}
+      </div>
+      ${summary
+        ? html`<p class="check-summary" role="status">${this._checkSummary(check)}</p>
+            <div class="check-actions">
+              <button class="check-close primary" @click=${() => void this._endCheck()}>
+                ${check.wrongElements.length > 0 ? 'Relink now' : 'Close'}
+              </button>
+            </div>`
+        : html`${step ? html`<div class="check-for">${step.label} · ${step.levelName}</div>` : nothing}
+            ${phase === 'problem'
+              ? html`<p class="check-prompt check-problem" role="alert">${check.problem}</p>`
+              : html`<p class="check-prompt" role="status">
+                  ${phase === 'asking' ? 'Was it the right one?' : 'Watch now. It switches for 2 seconds, then goes back.'}
+                </p>`}
+            <div class="check-actions">
+              ${phase === 'asking'
+                ? html`<button class="check-ok primary" ?disabled=${this._busy} @click=${() => this._checkOk()}>OK</button>
+                    <button class="check-wrong" ?disabled=${this._busy} @click=${() => void this._checkWrong()}>Wrong</button>`
+                : nothing}
+              ${phase === 'asking' || phase === 'problem'
+                ? html`<button class="check-again" ?disabled=${this._busy} @click=${() => this._checkAgain()}>Again</button>`
+                : nothing}
+              ${phase === 'problem'
+                ? html`<button class="check-skip" @click=${() => this._checkSkip()}>Skip</button>`
+                : nothing}
+            </div>`}
+    </section>`;
+  }
+
   private _done(): void {
     this.dispatchEvent(new CustomEvent('maxsen-link-done', { bubbles: true, composed: true }));
   }
 
-  override render(): TemplateResult {
-    // A home from a file is refreshed from a newer file. A paired home is refreshed from the
-    // planner, or from a file when the planner cannot be used (no internet, connection revoked).
+  /** The installer's tools, which Check all hides while it is open. */
+  private _renderTools(): TemplateResult {
     const fromFile = this.home?.source === 'file';
     const original = this.home?.display?.background === 'original';
+    return html`
+      ${this._walk
+        ? nothing
+        : html`<button class="start-walk" ?disabled=${!this.home?.package} @click=${() => this._startWalk()}>
+            Start linking walk
+          </button>`}
+      <button class="check-all" ?disabled=${!this._canCheck()} @click=${() => void this._startCheck()}>
+        Check all
+      </button>
+      <button class="multi" aria-pressed=${this._multi ? 'true' : 'false'} @click=${this._toggleMulti}>
+        Select several
+      </button>
+      <button class="starter" ?disabled=${this._busy} @click=${() => void this._createStarterScenes()}>
+        Create starter scenes
+      </button>
+      ${fromFile
+        ? nothing
+        : html`<button class="refresh" @click=${() => void this._preview()}>Refresh from planner</button>`}
+      <button class="choose-file" @click=${() => this.renderRoot.querySelector<HTMLInputElement>('input[type="file"]')?.click()}>
+        ${fromFile ? 'Choose a newer home file' : 'Use a home file instead'}
+      </button>
+      <button
+        class="original-background"
+        role="switch"
+        aria-checked=${original ? 'true' : 'false'}
+        ?disabled=${this._busy}
+        @click=${() => void this._toggleOriginal()}
+      >
+        <span class="track"><span class="knob"></span></span>
+        <span>Original background</span>
+      </button>
+      <input type="file" accept=".json,application/json" hidden @change=${(e: Event) => void this._chooseFile(e)} />
+    `;
+  }
+
+  override render(): TemplateResult {
     const walking = this._walk !== undefined;
     const picking = this._walk?.current?.kind === 'pick' && this._phase === 'waiting';
+    const checking = this._check !== undefined;
     return html`
-      ${this._renderWalk()}
+      ${checking ? this._renderCheck() : this._renderWalk()}
       <div class="toolbar">
         ${this._group ? nothing : html`<button class="done primary" @click=${this._done}>Done</button>`}
-        ${walking
-          ? nothing
-          : html`<button class="start-walk" ?disabled=${!this.home?.package} @click=${() => this._startWalk()}>
-              Start linking walk
-            </button>`}
-        <button class="multi" aria-pressed=${this._multi ? 'true' : 'false'} @click=${this._toggleMulti}>
-          Select several
-        </button>
-        <button class="starter" ?disabled=${this._busy} @click=${() => void this._createStarterScenes()}>
-          Create starter scenes
-        </button>
-        ${fromFile
-          ? nothing
-          : html`<button class="refresh" @click=${() => void this._preview()}>Refresh from planner</button>`}
-        <button class="choose-file" @click=${() => this.renderRoot.querySelector<HTMLInputElement>('input[type="file"]')?.click()}>
-          ${fromFile ? 'Choose a newer home file' : 'Use a home file instead'}
-        </button>
-        <button
-          class="original-background"
-          role="switch"
-          aria-checked=${original ? 'true' : 'false'}
-          ?disabled=${this._busy}
-          @click=${() => void this._toggleOriginal()}
-        >
-          <span class="track"><span class="knob"></span></span>
-          <span>Original background</span>
-        </button>
-        <input type="file" accept=".json,application/json" hidden @change=${(e: Event) => void this._chooseFile(e)} />
+        ${checking ? nothing : this._renderTools()}
       </div>
       ${this._notice
         ? html`<p class=${classMap({ notice: true, error: this._notice.error })} role="status">${this._notice.text}</p>`
         : nothing}
-      <div class="content">
-        ${this._renderPressToast()} ${walking ? nothing : this._renderCounts()}
-        ${!walking || picking ? this._renderSelection() : nothing} ${this._renderPressHint()}
-        ${!walking || picking ? this._renderCandidates() : nothing}
-        ${this._renderNotDrawn()}
-      </div>
+      ${checking
+        ? nothing
+        : html`<div class="content">
+            ${this._renderPressToast()} ${walking ? nothing : this._renderCounts()}
+            ${!walking || picking ? this._renderSelection() : nothing} ${this._renderPressHint()}
+            ${!walking || picking ? this._renderCandidates() : nothing}
+            ${this._renderNotDrawn()}
+          </div>`}
       ${this._renderDialog()}
     `;
   }
@@ -1259,7 +1535,8 @@ export class MaxsenLinkMode extends LitElement {
       text-align: left;
       font-size: 15px;
     }
-    .walk {
+    .walk,
+    .check {
       /* The prompt stays in view while the rest of the tools scroll under it. */
       position: sticky;
       top: 0;
@@ -1271,24 +1548,29 @@ export class MaxsenLinkMode extends LitElement {
       border-bottom: 1px solid var(--divider-color, #e3e6ea);
       background: color-mix(in srgb, var(--primary-color, #2f6fed) 8%, var(--card-background-color, #fff));
     }
-    .walk-head {
+    .walk-head,
+    .check-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
     }
-    .walk-progress {
+    .walk-progress,
+    .check-progress {
       font-size: 14px;
       font-weight: 600;
       letter-spacing: 0.02em;
       color: var(--secondary-text-color, #5b6168);
     }
-    .walk-for {
+    .walk-for,
+    .check-for {
       font-size: 15px;
       color: var(--secondary-text-color, #5b6168);
       overflow-wrap: anywhere;
     }
-    .walk-prompt {
+    .walk-prompt,
+    .check-prompt,
+    .check-summary {
       font-size: 19px;
       font-weight: 600;
       line-height: 1.35;
@@ -1311,12 +1593,17 @@ export class MaxsenLinkMode extends LitElement {
       font-weight: 600;
       color: var(--error-color, #b3261e);
     }
-    .walk-actions {
+    .check-problem {
+      color: var(--error-color, #b3261e);
+    }
+    .walk-actions,
+    .check-actions {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
     }
     .walk button:not(.include-other),
+    .check button,
     .press-hint button:not(.include-other):not(.listen) {
       min-height: 44px;
       padding: 0 18px;
@@ -1325,7 +1612,8 @@ export class MaxsenLinkMode extends LitElement {
       background: var(--card-background-color, #fff);
       font-size: 16px;
     }
-    .walk button.primary {
+    .walk button.primary,
+    .check button.primary {
       border-color: var(--primary-color, #2f6fed);
       background: var(--primary-color, #2f6fed);
       color: var(--text-primary-color, #fff);

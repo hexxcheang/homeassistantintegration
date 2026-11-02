@@ -157,6 +157,31 @@ describe('createFakeHass: services', () => {
     expect(fake.states['cover.smart_curtain_track']!.attributes['current_position']).toBe(100);
   });
 
+  it('stops covers and sets their position, as Check all needs', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const id = 'cover.smart_curtain_track';
+    await fake.callService('cover', 'stop_cover', { entity_id: id });
+    expect(fake.states[id]!.state).toBe('open');
+    await fake.callService('cover', 'set_cover_position', { entity_id: id, position: 40 });
+    expect(fake.states[id]!.state).toBe('open');
+    expect(fake.states[id]!.attributes['current_position']).toBe(40);
+    await fake.callService('cover', 'set_cover_position', { entity_id: id, position: 0 });
+    expect(fake.states[id]!.state).toBe('closed');
+    expect(fake.states[id]!.attributes['current_position']).toBe(0);
+    await expect(fake.callService('cover', 'set_cover_position', { entity_id: id, position: 'half' })).rejects.toMatchObject({
+      code: 'invalid_format',
+    });
+    expect(fake.states[id]!.attributes['current_position']).toBe(0);
+  });
+
+  it('turns lights and switches on and off by their own domain', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    await fake.callService('switch', 'turn_off', { entity_id: 'switch.entrance_switch_1' });
+    expect(fake.states['switch.entrance_switch_1']!.state).toBe('off');
+    await fake.callService('switch', 'turn_on', { entity_id: 'switch.entrance_switch_1' });
+    expect(fake.states['switch.entrance_switch_1']!.state).toBe('on');
+  });
+
   it('rejects a service it does not know', async () => {
     const fake = createFakeHass(fresh(), admin);
     await expect(fake.callService('vacuum', 'start', {})).rejects.toMatchObject({

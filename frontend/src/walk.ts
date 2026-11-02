@@ -92,14 +92,17 @@ function positionOf(item: SceneItem): Pt | undefined {
 }
 
 /**
- * The steps for every unlinked element, in walk order: levels by `sortOrder`; within a level the
- * non-lighting elements before the lighting ones; within each group top to bottom, then left to
- * right. Elements without a position go last in their group, in package order.
+ * The elements of the home for which `include` holds, in walk order: levels by `sortOrder`; within a
+ * level the non-lighting elements before the lighting ones; within each group top to bottom, then
+ * left to right. Elements without a position go last in their group, in package order.
  */
-export function buildQueue(home: HomeResponse): WalkStep[] {
+export function orderedElements(
+  home: HomeResponse,
+  include: (el: HomeElement) => boolean,
+): { el: HomeElement; levelName: string }[] {
   const pkg = home.package;
   if (!pkg) return [];
-  const steps: WalkStep[] = [];
+  const found: { el: HomeElement; levelName: string }[] = [];
   const levels = [...pkg.levels].sort((a, b) => a.sortOrder - b.sortOrder);
   for (const level of levels) {
     const positions = new Map<string, Pt>();
@@ -109,7 +112,7 @@ export function buildQueue(home: HomeResponse): WalkStep[] {
         const at = positionOf(item);
         if (at && !positions.has(item.elementId)) positions.set(item.elementId, at);
       }
-      for (const el of plan.elements) if (!home.links[el.id]) elements.push(el);
+      for (const el of plan.elements) if (include(el)) elements.push(el);
     }
     for (const lighting of [false, true]) {
       const group = elements.filter((el) => LIGHTING_CATEGORIES.has(el.categoryId) === lighting);
@@ -120,10 +123,15 @@ export function buildQueue(home: HomeResponse): WalkStep[] {
         const pb = positions.get(b.id)!;
         return pa.y - pb.y || pa.x - pb.x;
       });
-      for (const el of [...drawn, ...undrawn]) steps.push(stepFor(el));
+      for (const el of [...drawn, ...undrawn]) found.push({ el, levelName: level.name });
     }
   }
-  return steps;
+  return found;
+}
+
+/** The steps for every unlinked element, in walk order (see `orderedElements`). */
+export function buildQueue(home: HomeResponse): WalkStep[] {
+  return orderedElements(home, (el) => !home.links[el.id]).map(({ el }) => stepFor(el));
 }
 
 interface HistoryEntry {

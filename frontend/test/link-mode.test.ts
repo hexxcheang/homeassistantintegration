@@ -123,6 +123,7 @@ describe('toolbar', () => {
       '.dialog button',
       '.not-drawn-row',
       '.walk button',
+      '.check button',
       '.include-other',
       '.listen',
       '.press-relink',
@@ -1790,5 +1791,497 @@ describe('press to identify', () => {
     w.el.remove();
     await w.tick();
     expect(sub.unsub).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---- Check all ----
+
+const CURTAIN: Link = { type: 'device', id: 'dev-cur' };
+
+/**
+ * A link mode with a linked curtain (cur1) and the downlights (dl1 and dl2 on the first gang, dl3
+ * on the second), which Check all goes through in that order. `services` records every service call.
+ */
+async function mountCheck(
+  options: { links?: Record<string, Link>; without?: string[]; hass?: (h: HassLike) => void } = {},
+) {
+  const services = vi.fn(async (..._args: unknown[]) => undefined);
+  const w = await mountWalk({
+    links: Object.fromEntries(
+      Object.entries({ cur1: CURTAIN, dl1: GANG1, dl2: GANG1, dl3: GANG2, ...options.links }).filter(
+        ([id]) => !options.without?.includes(id),
+      ),
+    ),
+    hass: (h) => {
+      h.devices['dev-cur'] = { id: 'dev-cur', name: 'Curtain' };
+      h.entities['cover.cur'] = { entity_id: 'cover.cur', device_id: 'dev-cur' };
+      h.states['cover.cur'] = { state: 'open', attributes: { current_position: 100, supported_features: 15 } };
+      h.callService = services as never;
+      options.hass?.(h);
+    },
+  });
+  return { ...w, services };
+}
+type Checking = Awaited<ReturnType<typeof mountCheck>>;
+
+const startCheck = async (w: Checking) => {
+  click(q(w.el, '.check-all'));
+  await w.tick();
+};
+/** The 2 seconds are over; the state is back. */
+const afterTwoSeconds = (w: Checking) => w.tick(2000);
+const answer = async (w: Checking, which: 'ok' | 'wrong' | 'skip' | 'again') => {
+  click(q(w.el, `.check-${which}`));
+  await w.tick();
+};
+const serviceCalls = (w: Checking): unknown[][] => w.services.mock.calls as unknown[][];
+const serviceNames = (w: Checking): string[] => serviceCalls(w).map((c) => `${c[0]}.${c[1]}`);
+const checkPrompt = (w: Checking) => text(q(w.el, '.check-prompt'));
+const gone = (w: Checking, selector: string) => root(w.el as HTMLElement).querySelector(selector) === null;
+
+describe('Check all', () => {
+  it('has a Check all button in the toolbar', async () => {
+    const w = await mountCheck();
+    expect(text(q(w.el, '.check-all'))).toBe('Check all');
+    expect(q<HTMLButtonElement>(w.el, '.check-all').disabled).toBe(false);
+  });
+
+  it('says so when nothing linked can be checked', async () => {
+    // The curtain is linked to a device without a cover, and no light is linked.
+    const w = await mountCheck({ links: { cur1: HALL }, without: ['dl1', 'dl2', 'dl3'] });
+    await startCheck(w);
+    expect(text(q(w.el, '.notice'))).toBe('Nothing to check yet. Link a switch, light or curtain first.');
+    expect(gone(w, '.check')).toBe(true);
+    expect(serviceCalls(w)).toHaveLength(0);
+  });
+
+  describe('a step', () => {
+    it('highlights the element, switches it and asks OK or Wrong after the 2 seconds', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+
+      expect(text(q(w.el, '.check-for'))).toBe('Smart Curtain Track · Level 1');
+      expect(text(q(w.el, '.check-progress'))).toBe('1 / 3');
+      expect(checkPrompt(w)).toBe('Watch now. It switches for 2 seconds, then goes back.');
+      expect(w.current.at(-1)).toBe('cur1');
+      expect(w.selections.at(-1)).toEqual(['cur1']);
+      expect(serviceCalls(w)).toEqual([['cover', 'close_cover', { entity_id: 'cover.cur' }]]);
+      expect(gone(w, '.check-ok')).toBe(true);
+
+      await afterTwoSeconds(w);
+      expect(serviceNames(w)).toEqual(['cover.close_cover', 'cover.stop_cover', 'cover.set_cover_position']);
+      expect(serviceCalls(w)[2]![2]).toEqual({ entity_id: 'cover.cur', position: 100 });
+      expect(checkPrompt(w)).toBe('Was it the right one?');
+      expect(text(q(w.el, '.check-ok'))).toBe('OK');
+      expect(text(q(w.el, '.check-wrong'))).toBe('Wrong');
+    });
+
+    it('highlights every light of a gang, pulsing the first', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      expect(text(q(w.el, '.check-for'))).toBe('Luna Downlight and 1 more · Level 1');
+      expect(w.selections.at(-1)).toEqual(['dl1', 'dl2']);
+      expect(w.current.at(-1)).toBe('dl1');
+    });
+
+    it('switches a lit gang off and back on, and an unlit one on and back off', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await afterTwoSeconds(w);
+      expect(serviceCalls(w).slice(3)).toEqual([
+        ['switch', 'turn_off', { entity_id: 'switch.l1_gang1' }],
+        ['switch', 'turn_on', { entity_id: 'switch.l1_gang1' }],
+        ['switch', 'turn_on', { entity_id: 'switch.l1_gang2' }],
+        ['switch', 'turn_off', { entity_id: 'switch.l1_gang2' }],
+      ]);
+    });
+
+    it('can run the step again', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      await answer(w, 'again');
+      expect(checkPrompt(w)).toBe('Watch now. It switches for 2 seconds, then goes back.');
+      await afterTwoSeconds(w);
+      expect(serviceNames(w).filter((n) => n === 'cover.close_cover')).toHaveLength(2);
+      expect(text(q(w.el, '.check-progress'))).toBe('1 / 3');
+    });
+
+    it('does not accept OK or Wrong while the step is switching', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      expect(gone(w, '.check-ok')).toBe(true);
+      expect(gone(w, '.check-wrong')).toBe(true);
+    });
+  });
+
+  describe('the summary', () => {
+    it('counts OK and to relink, and unlinks what was marked Wrong with no naming', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await afterTwoSeconds(w);
+      await answer(w, 'wrong');
+
+      expect(linkCalls(w)).toEqual([{ type: 'maxsen/links/set', entry_id: 'e1', updates: { dl3: null } }]);
+      expect(text(q(w.el, '.check-summary'))).toBe('2 OK, 1 to relink');
+      expect(text(q(w.el, '.check-close'))).toBe('Relink now');
+    });
+
+    it('unlinks every light of the gang when it is Wrong', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await afterTwoSeconds(w);
+      await answer(w, 'wrong');
+      expect(linkCalls(w)[0]).toEqual({
+        type: 'maxsen/links/set',
+        entry_id: 'e1',
+        updates: { dl1: null, dl2: null },
+      });
+    });
+
+    it('offers Close, and starts no walk, when everything was OK', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      for (let i = 0; i < 3; i++) {
+        await afterTwoSeconds(w);
+        await answer(w, 'ok');
+      }
+      expect(text(q(w.el, '.check-summary'))).toBe('3 OK, 0 to relink');
+      expect(text(q(w.el, '.check-close'))).toBe('Close');
+      expect(linkCalls(w)).toHaveLength(0);
+      click(q(w.el, '.check-close'));
+      await w.tick();
+      expect(gone(w, '.check')).toBe(true);
+      expect(gone(w, '.walk')).toBe(true);
+      expect(w.subs).toHaveLength(0);
+      expect(w.selections.at(-1)).toEqual([]);
+      expect(w.current.at(-1)).toBeUndefined();
+      expect(text(q(w.el, '.check-all'))).toBe('Check all');
+    });
+
+    it('cannot be stopped while the unlink is being saved, so the walk never misses it', async () => {
+      let finish: (v: unknown) => void = () => undefined;
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      w.callWS.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+      click(q(w.el, '.check-wrong'));
+      await w.tick();
+      expect(q<HTMLButtonElement>(w.el, '.check-stop').disabled).toBe(true);
+      expect(q<HTMLButtonElement>(w.el, '.check-ok').disabled).toBe(true);
+      finish({ links: {} });
+      await w.tick();
+      expect(q<HTMLButtonElement>(w.el, '.check-stop').disabled).toBe(false);
+    });
+
+    it('does not move on, and says so, when the unlink is refused', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      w.callWS.mockRejectedValueOnce({ code: 'not_allowed', message: 'Linking needs installer mode' });
+      await answer(w, 'wrong');
+      expect(text(q(w.el, '.notice.error'))).toBe('Linking needs installer mode');
+      expect(checkPrompt(w)).toBe('Was it the right one?');
+      expect(text(q(w.el, '.check-progress'))).toBe('1 / 3');
+    });
+  });
+
+  describe('Wrong puts the elements back in the walk', () => {
+    const wrongOnLastGang = async (w: Checking) => {
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await afterTwoSeconds(w);
+      await answer(w, 'wrong');
+    };
+
+    it('starts a walk at the element when none is running, before the home has been reloaded', async () => {
+      const w = await mountCheck();
+      await wrongOnLastGang(w);
+      expect(gone(w, '.walk')).toBe(true); // nothing listens while Check all is open
+      expect(w.subs).toHaveLength(0);
+
+      click(q(w.el, '.check-close'));
+      await w.tick();
+      expect(w.current.at(-1)).toBe('dl3');
+      expect(text(q(w.el, '.walk-prompt'))).toBe('Press the gang that turns this on');
+      expect(text(q(w.el, '.walk-progress'))).toBe('3 / 8 linked');
+      expect(latest(w).msg).toEqual(identifyMessage({ mode: 'entity', kinds: ['light_gang'] }));
+    });
+
+    it('adds them to a walk that is running and goes to them', async () => {
+      const w = await mountCheck();
+      await startWalk(w);
+      expect(prompt(w)).toBe("Wave at the sensor, or open the door it's on");
+      const walking = latest(w);
+
+      await wrongOnLastGang(w);
+      expect(w.subs).toHaveLength(1);
+      expect(walking.unsub).toHaveBeenCalledTimes(1);
+
+      click(q(w.el, '.check-close'));
+      await w.tick();
+      expect(w.subs).toHaveLength(2);
+      expect(w.current.at(-1)).toBe('dl3');
+      expect(prompt(w)).toBe('Press the gang that turns this on');
+      expect(text(q(w.el, '.walk-progress'))).toBe('3 / 8 linked');
+
+      // The walk still has what it had: skipping the lights goes on to the rest.
+      click(q(w.el, '.walk-skip'));
+      await w.tick();
+      expect(w.current.at(-1)).toBe('sen1');
+    });
+
+    it('does not put an element back that was already marked Wrong through another gang', async () => {
+      // A 3-gang switch: Wrong on the first gang unlinks the switch, so its other gangs are not asked.
+      const w = await mountCheck({
+        links: { cur1: HALL, sw1: { type: 'device', id: 'dev-sw' } },
+        without: ['dl1', 'dl2', 'dl3'],
+        hass: (h) => {
+          h.devices['dev-sw'] = { id: 'dev-sw', name: 'Entrance switch' };
+          for (const n of [1, 2, 3]) {
+            h.entities[`switch.sw_${n}`] = { entity_id: `switch.sw_${n}`, device_id: 'dev-sw' };
+            h.states[`switch.sw_${n}`] = { state: 'off', attributes: {} };
+          }
+        },
+      });
+      await startCheck(w);
+      expect(text(q(w.el, '.check-for'))).toBe('Entrance switch · gang 1 of 3 · Level 1');
+      await afterTwoSeconds(w);
+      await answer(w, 'wrong');
+      expect(linkCalls(w)).toEqual([{ type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: null } }]);
+      expect(text(q(w.el, '.check-summary'))).toBe('0 OK, 1 to relink');
+      expect(serviceNames(w)).toEqual(['switch.turn_on', 'switch.turn_off']);
+    });
+  });
+
+  describe('while Check all is open', () => {
+    it('stops listening for a press first, and listens again only after everything is back', async () => {
+      const w = await mountCheck();
+      await startWalk(w);
+      const walking = latest(w);
+      w.subs.length = 0;
+      const subscribe = w.hass.connection.subscribeMessage as ReturnType<typeof vi.fn>;
+      subscribe.mockClear();
+
+      await startCheck(w);
+      expect(walking.unsub).toHaveBeenCalledTimes(1);
+      expect(walking.unsub.mock.invocationCallOrder[0]!).toBeLessThan(w.services.mock.invocationCallOrder[0]!);
+      expect(gone(w, '.walk')).toBe(true);
+
+      for (let i = 0; i < 3; i++) {
+        await afterTwoSeconds(w);
+        await answer(w, 'ok');
+      }
+      expect(subscribe).not.toHaveBeenCalled();
+      click(q(w.el, '.check-close'));
+      await w.tick();
+      expect(subscribe).toHaveBeenCalledTimes(1);
+      expect(subscribe.mock.invocationCallOrder[0]!).toBeGreaterThan(w.services.mock.invocationCallOrder.at(-1)!);
+    });
+
+    it('waits for a subscription that is still being set up before it switches anything', async () => {
+      const w = await mountCheck();
+      let arrive: () => void = () => undefined;
+      const unsub = vi.fn(async () => undefined);
+      w.hass.connection.subscribeMessage = vi.fn(
+        () => new Promise((resolve) => (arrive = () => resolve(unsub))),
+      ) as never;
+      await startWalk(w);
+
+      await startCheck(w);
+      expect(w.services).not.toHaveBeenCalled();
+
+      arrive();
+      await w.tick();
+      expect(unsub).toHaveBeenCalledTimes(1);
+      expect(w.services).toHaveBeenCalledTimes(1);
+      expect(unsub.mock.invocationCallOrder[0]!).toBeLessThan(w.services.mock.invocationCallOrder[0]!);
+    });
+
+    it('does not listen for a single marker either, and ignores taps on the drawing', async () => {
+      const w = await mountCheck();
+      w.el.tap('sw1'); // an unlinked switch: its press is listened for
+      await w.tick();
+      const single = latest(w);
+
+      await startCheck(w);
+      expect(single.unsub).toHaveBeenCalledTimes(1);
+      const before = w.subs.length;
+      w.el.tap('sen1');
+      await w.tick();
+      expect(w.selections.at(-1)).toEqual(['cur1']);
+      expect(w.subs).toHaveLength(before);
+    });
+
+    it('does not follow a new home or a reconnection into listening', async () => {
+      const w = await mountCheck();
+      await startWalk(w);
+      await startCheck(w);
+      const subs = w.subs.length;
+      w.links['sen1'] = HALL;
+      await w.pushHome();
+      w.reconnect();
+      await w.tick();
+      expect(w.subs).toHaveLength(subs);
+      // The walk does not move, or clear what Check all highlights, until Check all is over.
+      expect(w.selections.at(-1)).toEqual(['cur1']);
+      expect(w.current.at(-1)).toBe('cur1');
+    });
+
+    it('can only be started once, and the toolbar has nothing else to press but Done', async () => {
+      const w = await mountCheck();
+      const button = q<HTMLButtonElement>(w.el, '.check-all');
+      button.click();
+      button.click();
+      await w.tick();
+      expect(w.services).toHaveBeenCalledTimes(1);
+      expect(gone(w, '.check-all')).toBe(true);
+      expect(gone(w, '.start-walk')).toBe(true);
+      expect(gone(w, '.refresh')).toBe(true);
+      expect(text(q(w.el, '.done'))).toBe('Done');
+    });
+
+    it('cannot be started while a walk step is being saved or confirmed', async () => {
+      const w = await mountCheck();
+      await startWalk(w);
+      await press(w, { device_id: 'dev-motion', name: 'Motion puck' }); // the Linked toast is showing
+      expect(q<HTMLButtonElement>(w.el, '.check-all').disabled).toBe(true);
+      await w.tick(2100);
+      expect(q<HTMLButtonElement>(w.el, '.check-all').disabled).toBe(false);
+    });
+  });
+
+  describe('a step that cannot be switched', () => {
+    it('reports an unavailable entity, does not switch it, and lets the installer skip it', async () => {
+      const w = await mountCheck({
+        hass: (h) => {
+          h.states['switch.l1_gang2'] = { state: 'unavailable', attributes: {} };
+        },
+      });
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+
+      expect(text(q(w.el, '.check-for'))).toBe('Luna Downlight · Level 1');
+      expect(checkPrompt(w)).toBe('Luna Downlight is unavailable, so it was not switched.');
+      expect(serviceCalls(w).some((c) => (c[2] as { entity_id: string }).entity_id === 'switch.l1_gang2')).toBe(false);
+      expect(gone(w, '.check-ok')).toBe(true);
+      expect(gone(w, '.check-wrong')).toBe(true);
+
+      await answer(w, 'skip');
+      expect(text(q(w.el, '.check-summary'))).toBe('2 OK, 0 to relink, 1 not tested');
+    });
+
+    it('shows the reason when switching fails, and can try again', async () => {
+      const w = await mountCheck();
+      w.services.mockRejectedValueOnce({ code: 'service_not_found', message: 'Service not found' });
+      await startCheck(w);
+      expect(checkPrompt(w)).toBe('Could not switch Smart Curtain Track: Service not found');
+      w.services.mockClear();
+      await answer(w, 'again');
+      expect(serviceNames(w)[0]).toBe('cover.close_cover');
+    });
+
+    it('says when a load could not be put back', async () => {
+      const w = await mountCheck();
+      w.services.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined).mockRejectedValueOnce({ message: 'Offline' });
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      expect(text(q(w.el, '.notice.error'))).toBe('Could not put Smart Curtain Track back. Check it by hand.');
+    });
+  });
+
+  describe('leaving in the middle of a step', () => {
+    it('Stop puts the load back at once, closes the bar and says what was done', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await w.tick(500);
+      expect(serviceNames(w).at(-1)).toBe('switch.turn_off');
+
+      click(q(w.el, '.check-stop'));
+      await w.tick();
+      expect(serviceCalls(w).slice(-2)).toEqual([
+        ['switch', 'turn_off', { entity_id: 'switch.l1_gang1' }],
+        ['switch', 'turn_on', { entity_id: 'switch.l1_gang1' }],
+      ]);
+      expect(gone(w, '.check')).toBe(true);
+      expect(text(q(w.el, '.notice'))).toBe('Check all stopped. 1 OK, 0 to relink.');
+      expect(w.selections.at(-1)).toEqual([]);
+
+      const count = serviceCalls(w).length;
+      await w.tick(5000);
+      expect(serviceCalls(w)).toHaveLength(count);
+    });
+
+    it('Stop goes back to a walk that was on, with its elements', async () => {
+      const w = await mountCheck();
+      await startWalk(w);
+      await startCheck(w);
+      await w.tick(300);
+      click(q(w.el, '.check-stop'));
+      await w.tick();
+      expect(prompt(w)).toBe("Wave at the sensor, or open the door it's on");
+      expect(w.subs).toHaveLength(2);
+    });
+
+    it('puts the load back when link mode is closed', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await w.tick(500);
+      expect(serviceNames(w)).toEqual(['cover.close_cover']);
+
+      w.el.remove();
+      await w.tick();
+      expect(serviceNames(w)).toEqual(['cover.close_cover', 'cover.stop_cover', 'cover.set_cover_position']);
+      const count = serviceCalls(w).length;
+      await w.tick(5000);
+      expect(serviceCalls(w)).toHaveLength(count);
+    });
+
+    it('puts the load back when Done is pressed, which closes link mode', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      await answer(w, 'ok');
+      await w.tick(700);
+      const done = vi.fn(() => w.el.remove()); // the panel takes link mode away
+      w.el.addEventListener('maxsen-link-done', done);
+      click(q(w.el, '.done'));
+      await w.tick();
+      expect(done).toHaveBeenCalledTimes(1);
+      expect(serviceCalls(w).slice(-2)).toEqual([
+        ['switch', 'turn_off', { entity_id: 'switch.l1_gang1' }],
+        ['switch', 'turn_on', { entity_id: 'switch.l1_gang1' }],
+      ]);
+    });
+
+    it('does nothing more after it was removed between steps', async () => {
+      const w = await mountCheck();
+      await startCheck(w);
+      await afterTwoSeconds(w);
+      const count = serviceCalls(w).length;
+      w.el.remove();
+      await w.tick(5000);
+      expect(serviceCalls(w)).toHaveLength(count);
+    });
   });
 });

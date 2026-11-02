@@ -2199,12 +2199,19 @@ describe('Check all', () => {
       expect(serviceNames(w)[0]).toBe('cover.close_cover');
     });
 
-    it('says when a load could not be put back', async () => {
+    it('says, and keeps saying, when a load could not be put back, and can try again or skip', async () => {
       const w = await mountCheck();
       w.services.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined).mockRejectedValueOnce({ message: 'Offline' });
       await startCheck(w);
       await afterTwoSeconds(w);
-      expect(text(q(w.el, '.notice.error'))).toBe('Could not put Smart Curtain Track back. Check it by hand.');
+      expect(checkPrompt(w)).toBe('Could not put Smart Curtain Track back. Check it by hand.');
+      expect(root(w.el as HTMLElement).querySelector('.check-prompt.check-problem')).not.toBeNull();
+      await w.tick(10_000); // not a notice that goes away
+      expect(checkPrompt(w)).toBe('Could not put Smart Curtain Track back. Check it by hand.');
+      expect(gone(w, '.check-ok')).toBe(true);
+      expect(text(q(w.el, '.check-again'))).toBe('Again');
+      await answer(w, 'skip');
+      expect(text(q(w.el, '.check-progress'))).toBe('2 / 3');
     });
   });
 
@@ -2283,5 +2290,134 @@ describe('Check all', () => {
       await w.tick(5000);
       expect(serviceCalls(w)).toHaveLength(count);
     });
+  });
+});
+
+describe('Check all: what it switches must not be heard as a press', () => {
+  /** Zigbee reports 400 ms after the call. */
+  const lag = (w: Checking) =>
+    w.services.mockImplementation(async (...args: unknown[]) => {
+      const [, service, data] = args as [string, string, { entity_id: string }];
+      if (service !== 'turn_on' && service !== 'turn_off') return undefined;
+      setTimeout(() => {
+        w.hass.states[data.entity_id] = { state: service === 'turn_on' ? 'on' : 'off', attributes: {} };
+      }, 400);
+      return undefined;
+    });
+
+  it('listens again only after the load has reported being back', async () => {
+    const w = await mountCheck();
+    await startWalk(w);
+    const subscribe = w.hass.connection.subscribeMessage as ReturnType<typeof vi.fn>;
+    subscribe.mockClear();
+    lag(w);
+    await startCheck(w);
+    await afterTwoSeconds(w);
+    await answer(w, 'ok'); // the curtain; the first gang is switched off now
+    await w.tick(1000);
+    expect(w.hass.states['switch.l1_gang1']!.state).toBe('off');
+
+    click(q(w.el, '.check-stop'));
+    await w.tick(100);
+    expect(serviceNames(w).at(-1)).toBe('switch.turn_on');
+    expect(w.hass.states['switch.l1_gang1']!.state).toBe('off'); // the put-back has not landed
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(text(q(w.el, '.check-progress'))).toBe('2 / 3'); // still closing
+
+    await w.tick(500);
+    expect(w.hass.states['switch.l1_gang1']!.state).toBe('on');
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(gone(w, '.check')).toBe(true);
+  });
+
+  it('waits in the same way when Relink now follows a Wrong while the load is coming back', async () => {
+    const w = await mountCheck();
+    lag(w);
+    await startCheck(w);
+    await afterTwoSeconds(w);
+    await answer(w, 'ok');
+    await afterTwoSeconds(w);
+    await w.tick(500); // landed: asking
+    expect(text(q(w.el, '.check-ok'))).toBe('OK');
+    await answer(w, 'wrong'); // unlinks dl1, dl2
+    await afterTwoSeconds(w);
+    await w.tick(500);
+    await answer(w, 'ok');
+    const subscribe = w.hass.connection.subscribeMessage as ReturnType<typeof vi.fn>;
+    expect(subscribe).not.toHaveBeenCalled();
+    click(q(w.el, '.check-close'));
+    await w.tick();
+    expect(subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('puts the step back when the screen is turned off, and says so', async () => {
+    const w = await mountCheck();
+    await startCheck(w);
+    await w.tick(500);
+    const hide = (state: 'hidden' | 'visible') => {
+      Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+    hide('hidden');
+    await w.tick();
+    expect(serviceNames(w)).toEqual(['cover.close_cover', 'cover.stop_cover', 'cover.set_cover_position']);
+    expect(checkPrompt(w)).toBe('Smart Curtain Track was put back when the screen turned off. Run it again.');
+    hide('visible');
+    await w.tick(5000);
+    expect(serviceNames(w)).toHaveLength(3); // nothing more happens by itself
+    await answer(w, 'again');
+    expect(checkPrompt(w)).toBe('Watch now. It switches for 2 seconds, then goes back.');
+    expect(serviceNames(w)).toHaveLength(4);
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+
+  it('ignores the screen turning off between steps, and stops listening for it when Check all is over', async () => {
+    const w = await mountCheck();
+    await startCheck(w);
+    await afterTwoSeconds(w); // asking
+    const hide = () => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+    hide();
+    await w.tick();
+    expect(checkPrompt(w)).toBe('Was it the right one?');
+    click(q(w.el, '.check-stop'));
+    await w.tick();
+    const count = serviceCalls(w).length;
+    hide();
+    await w.tick();
+    expect(serviceCalls(w)).toHaveLength(count);
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+
+  it('removes the screen listener when link mode is closed', async () => {
+    const remove = vi.spyOn(document, 'removeEventListener');
+    const w = await mountCheck();
+    await startCheck(w);
+    w.el.remove();
+    await w.tick();
+    expect(remove.mock.calls.some(([type]) => type === 'visibilitychange')).toBe(true);
+  });
+
+  it('highlights the switch too when a gang is also a gang of a linked switch, and names it', async () => {
+    const w = await mountCheck({
+      links: { sw1: { type: 'device', id: 'dev-sw' }, dl1: { type: 'entity', id: 'switch.sw_1' } },
+      without: ['cur1', 'dl2', 'dl3'],
+      hass: (h) => {
+        h.devices['dev-sw'] = { id: 'dev-sw', name: 'Entrance switch' };
+        for (const n of [1, 2, 3]) {
+          h.entities[`switch.sw_${n}`] = { entity_id: `switch.sw_${n}`, device_id: 'dev-sw' };
+          h.states[`switch.sw_${n}`] = { state: 'off', attributes: {} };
+        }
+      },
+    });
+    await startCheck(w);
+    expect(text(q(w.el, '.check-for'))).toBe('Luna Downlight · via Entrance switch, gang 1 of 3 · Level 1');
+    expect(w.selections.at(-1)).toEqual(['dl1', 'sw1']);
+    expect(w.current.at(-1)).toBe('dl1');
+    await afterTwoSeconds(w);
+    await answer(w, 'wrong');
+    expect(linkCalls(w)).toEqual([{ type: 'maxsen/links/set', entry_id: 'e1', updates: { dl1: null } }]);
   });
 });

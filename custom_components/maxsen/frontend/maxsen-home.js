@@ -3062,32 +3062,33 @@ var Vn = class {
 		for (let t of e) this.skipped.delete(t);
 		this.cursor = t, this.cursor >= this.queue.length && (this.cursor = 0);
 	}
-}, Hn = 2e3, Un = 4, Wn = 8, Gn = /* @__PURE__ */ new Set(["switch", "light"]), Kn = /* @__PURE__ */ new Set(["cover"]), qn = /* @__PURE__ */ new Set(["smart-switches", "control-panels"]), Jn = (e) => e.label || e.productName;
-function Yn(e) {
+}, Hn = 2e3, Un = 100, Wn = 3e3, Gn = 6e4, Kn = 2, qn = 4, Jn = 8, Yn = /* @__PURE__ */ new Set(["switch", "light"]), Xn = /* @__PURE__ */ new Set(["cover"]), Zn = /* @__PURE__ */ new Set(["smart-switches", "control-panels"]), Qn = (e) => e.label || e.productName;
+function $n(e) {
 	if (e.categoryId === "curtains-blinds") return {
 		lights: !1,
-		domains: Kn
+		domains: Xn
 	};
-	if (qn.has(e.categoryId)) return {
+	if (Zn.has(e.categoryId)) return {
 		lights: !1,
-		domains: Gn
+		domains: Yn
 	};
 	if (_.has(e.categoryId)) return {
 		lights: !0,
-		domains: Gn
+		domains: Yn
 	};
 }
-var Xn = class {
+var er = class {
 	hass;
 	home;
 	active;
+	memos = /* @__PURE__ */ new Map();
 	constructor(e, t) {
 		this.hass = e, this.home = t;
 	}
 	steps() {
 		let { hass: e, home: t } = this, n = /* @__PURE__ */ new Map();
 		for (let { el: e, levelName: r } of zn(t, (e) => !!t.links[e.id])) {
-			let i = Yn(e), a = t.links[e.id];
+			let i = $n(e), a = t.links[e.id];
 			if (!i || !a) continue;
 			let o = this.entitiesOf(a, i.domains);
 			o.forEach((t, a) => {
@@ -3107,15 +3108,22 @@ var Xn = class {
 		return [...n.values()].map((e) => this.stepOf(e));
 	}
 	entitiesOf(e, t) {
-		return e.type === "entity" ? t.has(d(e.id)) ? [e.id] : [] : p(this.hass, e.id).map((e) => e.entity_id).filter((e) => t.has(d(e)));
+		return e.type === "entity" ? t.has(d(e.id)) ? [e.id] : [] : p(this.hass, e.id).map((e) => e.entity_id).filter((e) => t.has(d(e))).sort((e, t) => e.localeCompare(t, "en", { numeric: !0 }));
 	}
 	stepOf(e) {
-		let t = e.lights.length > 0 ? e.lights : e.others, n = t.map(Jn);
+		let t = e.lights.length > 0 ? e.lights : e.others, n = t.map(Qn), r = e.gang ? `gang ${e.gang.index} of ${e.gang.count}` : "", i;
+		if (e.lights.length === 0) i = `${n[0]}${r ? ` · ${r}` : ""}`;
+		else {
+			i = n.length === 1 ? n[0] : `${n[0]} and ${n.length - 1} more`;
+			let t = e.others[0];
+			t && (i += ` · via ${Qn(t)}${r ? `, ${r}` : ""}`);
+		}
 		return {
-			label: e.lights.length > 0 ? n.length === 1 ? n[0] : `${n[0]} and ${n.length - 1} more` : `${n[0]}${e.gang ? ` · gang ${e.gang.index} of ${e.gang.count}` : ""}`,
+			label: i,
 			levelName: e.levelName,
 			entityIds: [e.entityId],
-			elementIds: t.map((e) => e.id)
+			elementIds: t.map((e) => e.id),
+			highlightIds: [...t, ...e.lights.length > 0 ? e.others : []].map((e) => e.id)
 		};
 	}
 	unavailable(e) {
@@ -3131,19 +3139,22 @@ var Xn = class {
 			status: "unavailable",
 			entityIds: t
 		});
-		let n = e.entityIds.map((e) => this.remember(e)), r = {
+		let n = e.entityIds.join(","), r = this.memos.get(n);
+		r || (r = e.entityIds.map((e) => this.remember(e)), this.memos.set(n, r));
+		let i = {
 			cancelled: !1,
+			skipSettle: !1,
 			timer: void 0,
 			wake: void 0,
 			done: Promise.resolve()
 		};
-		return this.active = r, r.done = this.execute(n, r).finally(() => {
-			this.active === r && (this.active = void 0);
-		}), r.done;
+		return this.active = i, i.done = this.execute(r, i).finally(() => {
+			this.active === i && (this.active = void 0);
+		}), i.done;
 	}
-	async abort() {
-		let e = this.active;
-		e && (e.cancelled = !0, clearTimeout(e.timer), e.wake?.(), await e.done);
+	async abort(e = !0) {
+		let t = this.active;
+		t && (t.cancelled = !0, e || (t.skipSettle = !0), clearTimeout(t.timer), t.wake?.(), await t.done);
 	}
 	remember(e) {
 		let t = this.hass.states[e];
@@ -3159,7 +3170,7 @@ var Xn = class {
 		for (let e of r) e.status === "rejected" && (n ??= m(e.reason, "Home Assistant refused."));
 		n === void 0 && await this.wait(t);
 		let i = (await Promise.allSettled(e.map((e) => this.putBack(e)))).every((e) => e.status === "fulfilled");
-		return n === void 0 ? t.cancelled ? {
+		return await Promise.all(e.map((e) => this.settled(e, t))), n === void 0 ? t.cancelled ? {
 			status: "cancelled",
 			restored: i
 		} : {
@@ -3176,6 +3187,20 @@ var Xn = class {
 			e.wake = t, e.timer = setTimeout(t, Hn);
 		});
 	}
+	async settled(e, t) {
+		let n = e.domain === "cover" ? Gn : Wn;
+		for (let r = 0; r < n && !t.skipSettle && !this.isBack(e); r += Un) await new Promise((e) => setTimeout(e, Un));
+	}
+	isBack(e) {
+		let t = this.hass.states[e.id];
+		if (!t) return !0;
+		if (e.domain !== "cover") return t.state === e.state;
+		if (t.state === "opening" || t.state === "closing") return !1;
+		let n = e.state === "closed" || e.state === "closing";
+		if (t.state !== (n ? "closed" : "open")) return !1;
+		let r = e.attributes.current_position, i = t.attributes.current_position;
+		return typeof r == "number" && typeof i == "number" && this.supports(e, qn, !0) ? Math.abs(i - r) <= Kn : !0;
+	}
 	async switchAway(e) {
 		let t = { entity_id: e.id };
 		e.domain === "cover" ? await this.hass.callService("cover", e.state === "closed" ? "open_cover" : "close_cover", t) : await this.hass.callService(e.domain, e.state === "on" ? "turn_off" : "turn_on", t);
@@ -3187,13 +3212,13 @@ var Xn = class {
 			return;
 		}
 		let n;
-		if (this.supports(e, Wn, !0)) try {
+		if (this.supports(e, Jn, !0)) try {
 			await this.hass.callService("cover", "stop_cover", t);
 		} catch (e) {
 			n = e;
 		}
 		let r = e.attributes.current_position, i = e.state === "closed" || e.state === "closing";
-		if (this.supports(e, Un, typeof r == "number")) {
+		if (this.supports(e, qn, typeof r == "number")) {
 			let e = typeof r == "number" ? r : i ? 0 : 100;
 			await this.hass.callService("cover", "set_cover_position", {
 				...t,
@@ -3206,15 +3231,15 @@ var Xn = class {
 		let r = e.attributes.supported_features;
 		return typeof r == "number" ? (r & t) !== 0 : n;
 	}
-}, Zn = 5e3, Qn = "Select lights together, or other devices together, not both.", $n = 2e3, er = "Two devices reacted. Press once more.", tr = "The walk stopped. Open Installer to carry on.", nr = "Identifying stopped because installer mode was switched off.", rr = "Tap the other lights that came on", ir = "Nothing to check yet. Link a switch, light or curtain first.", ar = (e) => typeof e.name == "string", or = (e, t) => (e ?? null) === (t ?? null) || e != null && t != null && e.type === t.type && e.id === t.id, Q = (e, t, n) => `${e} ${e === 1 ? t : n}`, $ = (e) => e.label || e.productName, sr = (e) => _.has(e.categoryId);
-function cr(e) {
+}, tr = 5e3, nr = "Select lights together, or other devices together, not both.", rr = 2e3, ir = "Two devices reacted. Press once more.", ar = "The walk stopped. Open Installer to carry on.", or = "Identifying stopped because installer mode was switched off.", sr = "Tap the other lights that came on", cr = "Nothing to check yet. Link a switch, light or curtain first.", lr = (e) => typeof e.name == "string", ur = (e, t) => (e ?? null) === (t ?? null) || e != null && t != null && e.type === t.type && e.id === t.id, Q = (e, t, n) => `${e} ${e === 1 ? t : n}`, $ = (e) => e.label || e.productName, dr = (e) => _.has(e.categoryId);
+function fr(e) {
 	return [
 		`${Q(e.added.length, "new device", "new devices")} to link`,
 		`${Q(e.removed.length, "device", "devices")} removed`,
 		`${Q(e.changed_drawings.length, "drawing", "drawings")} updated`
 	].join(", ");
 }
-var lr = class extends V {
+var pr = class extends V {
 	static properties = {
 		hass: { attribute: !1 },
 		home: { attribute: !1 },
@@ -3255,7 +3280,7 @@ var lr = class extends V {
 	disconnectedCallback() {
 		super.disconnectedCallback(), this._bindConnection(), clearTimeout(this._noticeTimer), this._stopListening(), this._clearToast();
 		let e = this._check;
-		this._check = void 0, e && (e.token++, e.all.abort()), this._walk = void 0, this._group = void 0, this._armed = !1, this._singleKey = "", this._singleFor = void 0, this._expected.clear();
+		this._check = void 0, document.removeEventListener("visibilitychange", this._onVisibility), e && (e.token++, e.all.abort(!1)), this._walk = void 0, this._group = void 0, this._armed = !1, this._singleKey = "", this._singleFor = void 0, this._expected.clear();
 	}
 	willUpdate(e) {
 		if (e.has("hass") && (this._bindConnection(), this._check && this.hass && (this._check.all.hass = this.hass)), !e.has("home")) return;
@@ -3286,8 +3311,8 @@ var lr = class extends V {
 		else if (!this._multi) this._select([e]);
 		else {
 			let r = this._known.get(n[0] ?? "")?.el;
-			if (r && sr(r) !== sr(t)) {
-				this._say(Qn, !1);
+			if (r && dr(r) !== dr(t)) {
+				this._say(nr, !1);
 				return;
 			}
 			this._select([...n, e]);
@@ -3307,7 +3332,7 @@ var lr = class extends V {
 		this._notice = {
 			text: e,
 			error: t
-		}, clearTimeout(this._noticeTimer), this._noticeTimer = setTimeout(() => this._notice = void 0, Zn);
+		}, clearTimeout(this._noticeTimer), this._noticeTimer = setTimeout(() => this._notice = void 0, tr);
 	}
 	async _link(e, t = {}) {
 		let { hass: n, entryId: r } = this;
@@ -3403,14 +3428,14 @@ var lr = class extends V {
 	}
 	async _onSinglePress(e, t) {
 		if ("stopped" in t) {
-			this._stopListening(), this._armed = !1, this._singleKey = "", this._say(nr, !0);
+			this._stopListening(), this._armed = !1, this._singleKey = "", this._say(or, !0);
 			return;
 		}
 		if ("ambiguous" in t) {
 			this._ambiguous = !0;
 			return;
 		}
-		if (!ar(t)) return;
+		if (!lr(t)) return;
 		this._stopListening(), this._ambiguous = !1;
 		let n = this._linkOf(t);
 		this._selected.length === 1 && this._selected[0] === e.elementId && (await this._link(n, {
@@ -3440,7 +3465,7 @@ var lr = class extends V {
 	async _onWalkPress(e, t) {
 		let n = this._walk;
 		if ("stopped" in t) {
-			this._endWalk(tr, !0);
+			this._endWalk(ar, !0);
 			return;
 		}
 		if ("ambiguous" in t) {
@@ -3448,7 +3473,7 @@ var lr = class extends V {
 			return;
 		}
 		let { hass: r, entryId: i } = this;
-		if (!ar(t) || !n || !r || !i) return;
+		if (!lr(t) || !n || !r || !i) return;
 		this._stopListening(), this._ambiguous = !1;
 		let a = this._linkOf(t), o = e.elementId, s = { [o]: this._walkHome()?.links[o] ?? null };
 		this._phase = "linking";
@@ -3473,7 +3498,7 @@ var lr = class extends V {
 		}, this._phase = "others"));
 	}
 	_showToast(e) {
-		this._toast = e, this._walk && (this._phase = "linked"), clearTimeout(this._toastTimer), this._toastTimer = setTimeout(() => this._toastOver(), $n);
+		this._toast = e, this._walk && (this._phase = "linked"), clearTimeout(this._toastTimer), this._toastTimer = setTimeout(() => this._toastOver(), rr);
 	}
 	_toastOver() {
 		this._walk ? this._advance() : this._clearToast();
@@ -3548,7 +3573,7 @@ var lr = class extends V {
 		if (!t) return;
 		let n = this._group;
 		if (this._phase === "others" && n) {
-			if (!sr(e) || e.id === n.elementId) return;
+			if (!dr(e) || e.id === n.elementId) return;
 			let t = n.others.includes(e.id) ? n.others.filter((t) => t !== e.id) : [...n.others, e.id];
 			this._group = {
 				...n,
@@ -3573,7 +3598,7 @@ var lr = class extends V {
 	_homeChanged() {
 		let e = this.home;
 		if (!e) return;
-		for (let [t, n] of [...this._expected]) or(e.links[t], n) && this._expected.delete(t);
+		for (let [t, n] of [...this._expected]) ur(e.links[t], n) && this._expected.delete(t);
 		let t = this._walk;
 		if (!t || this._phase !== "waiting" || this._check) return;
 		let n = t.current?.elementId, r = this._walkHome();
@@ -3585,9 +3610,9 @@ var lr = class extends V {
 	async _startCheck() {
 		let { hass: e } = this, t = this._walkHome();
 		if (!e || !t || !this._canCheck()) return;
-		let n = new Xn(e, t), r = n.steps();
+		let n = new er(e, t), r = n.steps();
 		if (r.length === 0) {
-			this._say(ir, !1);
+			this._say(cr, !1);
 			return;
 		}
 		let i = {
@@ -3601,8 +3626,12 @@ var lr = class extends V {
 			wrongElements: [],
 			token: 0
 		};
-		this._check = i, this._stopListening(), this._armed = !1, this._singleKey = "", this._singleFor = void 0, this._ambiguous = !1, this._select([]), await this._subscribing, this._check === i && this._runCheckStep();
+		document.addEventListener("visibilitychange", this._onVisibility), this._check = i, this._stopListening(), this._armed = !1, this._singleKey = "", this._singleFor = void 0, this._ambiguous = !1, this._select([]), await this._subscribing, this._check === i && this._runCheckStep();
 	}
+	_onVisibility = () => {
+		let e = this._check;
+		document.visibilityState === "hidden" && e && e.phase === "running" && e.all.abort();
+	};
 	async _runCheckStep() {
 		let e = this._check;
 		if (!e) return;
@@ -3614,10 +3643,13 @@ var lr = class extends V {
 			return;
 		}
 		let r = ++e.token;
-		e.phase = "running", e.problem = void 0, this._select(n.elementIds), this.requestUpdate();
-		let i = await e.all.run(n);
-		if ("restored" in i && !i.restored && this.isConnected && this._say(`Could not put ${n.label} back. Check it by hand.`, !0), this._check === e && e.token === r) {
-			if (i.status === "done") e.phase = "asking";
+		e.phase = "running", e.problem = void 0, this._select(n.highlightIds), this.requestUpdate();
+		let i = await e.all.run(n), a = "restored" in i && !i.restored;
+		if (this._check !== e || e.token !== r) a && this.isConnected && this._say(`Could not put ${n.label} back. Check it by hand.`, !0);
+		else {
+			if (a) e.phase = "problem", e.problem = `Could not put ${n.label} back. Check it by hand.`;
+			else if (i.status === "done") e.phase = "asking";
+			else if (i.status === "cancelled") e.phase = "problem", e.problem = `${n.label} was put back when the screen turned off. Run it again.`;
 			else if (i.status === "unavailable") e.phase = "problem", e.problem = `${n.label} is unavailable, so it was not switched.`;
 			else if (i.status === "failed") e.phase = "problem", e.problem = `Could not switch ${n.label}: ${i.message}`;
 			else return;
@@ -3659,7 +3691,7 @@ var lr = class extends V {
 	async _endCheck(e = !1) {
 		let t = this._check;
 		if (!t || t.phase === "ending" || (t.phase = "ending", t.token++, this.requestUpdate(), await t.all.abort(), this._check !== t)) return;
-		this._check = void 0, this._select([]);
+		this._check = void 0, document.removeEventListener("visibilitychange", this._onVisibility), this._select([]);
 		let [n] = t.wrongElements, r = this._walk;
 		if (r) {
 			let e = this._walkHome();
@@ -3877,7 +3909,7 @@ var lr = class extends V {
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="refresh-title">
         <h3 id="refresh-title">Refresh the home</h3>
         ${e.phase === "checking" ? N`<p class="working">${e.fromFile ? "Reading the file…" : "Checking the planner…"}</p>` : I}
-        ${t ? N`<p class="summary">${cr(t)}</p>
+        ${t ? N`<p class="summary">${fr(t)}</p>
               ${r ? N`${this._renderChanges("New devices", t.added.map(n))}
                   ${this._renderChanges("Removed devices", t.removed.map(n))}
                   ${this._renderChanges("Updated drawings", t.changed_drawings.map((e) => `${e.levelName} · ${e.type === "lighting" ? "Lighting" : "Smart Home"}`))}` : N`<p class="nothing">Nothing has changed.</p>`}` : I}
@@ -3919,7 +3951,7 @@ var lr = class extends V {
 		let e = this._selected.length === 1 ? this._selected[0] : void 0, t = this._known.get(e ?? "")?.el;
 		return !e || !t || Ln(t).kind === "pick" ? I : this._armed ? N`<div class="press-hint">
         <p class="hint">Press the device now</p>
-        ${this._ambiguous ? N`<p class="press-warning" role="alert">${er}</p>` : I}
+        ${this._ambiguous ? N`<p class="press-warning" role="alert">${ir}</p>` : I}
         ${this._renderListen(!0)} ${this._renderIncludeOther()}
       </div>` : this.home?.links[e] ? N`<button class="press-relink" @click=${() => this._setArmed(!0)}>Press to relink</button>` : N`<div class="press-tools">${this._renderListen(!1)}</div>`;
 	}
@@ -3945,8 +3977,8 @@ var lr = class extends V {
       ${o ? N`<div class="walk-toast" role="status">
             <span class="walk-linked">Linked: ${this._nameOf(o.link, o.name)}</span>
             <button class="walk-undo" ?disabled=${this._busy} @click=${() => void this._undo()}>Undo</button>
-          </div>` : N`<p class="walk-prompt" role="status">${this._phase === "others" ? rr : t.prompt}</p>`}
-      ${this._ambiguous ? N`<p class="walk-warning" role="alert">${er}</p>` : I}
+          </div>` : N`<p class="walk-prompt" role="status">${this._phase === "others" ? sr : t.prompt}</p>`}
+      ${this._ambiguous ? N`<p class="walk-warning" role="alert">${ir}</p>` : I}
       <div class="walk-actions">
         ${s ? N`<button class="walk-done primary" ?disabled=${this._busy} @click=${() => void this._doneGroup()}>Link these lights</button>
               <button class="walk-undo" ?disabled=${this._busy} @click=${() => void this._undo()}>Undo</button>` : I}
@@ -3972,7 +4004,7 @@ var lr = class extends V {
               </button>
             </div>` : N`${t ? N`<div class="check-for">${t.label} · ${t.levelName}</div>` : I}
             ${n === "problem" ? N`<p class="check-prompt check-problem" role="alert">${e.problem}</p>` : N`<p class="check-prompt" role="status">
-                  ${n === "asking" ? "Was it the right one?" : "Watch now. It switches for 2 seconds, then goes back."}
+                  ${n === "asking" ? "Was it the right one?" : n === "ending" ? "Putting it back…" : "Watch now. It switches for 2 seconds, then goes back."}
                 </p>`}
             <div class="check-actions">
               ${n === "asking" ? N`<button class="check-ok primary" ?disabled=${this._busy} @click=${() => this._checkOk()}>OK</button>
@@ -4458,24 +4490,24 @@ var lr = class extends V {
     }
   `;
 };
-customElements.get("maxsen-link-mode") || customElements.define("maxsen-link-mode", lr);
+customElements.get("maxsen-link-mode") || customElements.define("maxsen-link-mode", pr);
 // src/maxsen-home-panel.ts
-var ur = 900, dr = [], fr = [
+var mr = 900, hr = [], gr = [
 	2e3,
 	5e3,
 	1e4
-], pr = 3e4, mr = class extends Error {};
-function hr(e) {
+], _r = 3e4, vr = class extends Error {};
+function yr(e) {
 	let t = typeof e == "object" && e ? e.code : void 0;
 	return t === "not_found" || t === "unknown_command";
 }
-function gr(e) {
-	return fr[e] ?? pr;
+function br(e) {
+	return gr[e] ?? _r;
 }
-function _r(e, t) {
-	return e >= ur && e > t ? "side" : "stacked";
+function xr(e, t) {
+	return e >= mr && e > t ? "side" : "stacked";
 }
-var vr = class extends V {
+var Sr = class extends V {
 	static properties = {
 		hass: { attribute: !1 },
 		narrow: { type: Boolean },
@@ -4503,7 +4535,7 @@ var vr = class extends V {
 	connectedCallback() {
 		super.connectedCallback(), typeof ResizeObserver < "u" && (this._observer = new ResizeObserver((e) => {
 			let t = e[0]?.contentRect;
-			t && (this._layout = _r(t.width, t.height));
+			t && (this._layout = xr(t.width, t.height));
 		}), this._observer.observe(this)), this.hass && this._listen(this.hass.connection);
 	}
 	disconnectedCallback() {
@@ -4550,12 +4582,12 @@ var vr = class extends V {
 					this._entryId = void 0, this._status = "none";
 					return;
 				}
-				if (i.state !== "loaded") throw new mr(`Maxsen is ${i.state}`);
+				if (i.state !== "loaded") throw new vr(`Maxsen is ${i.state}`);
 				r = i.entryId;
 			}
 			this._entryId = r;
 			let i = await _e(t, r).catch((e) => {
-				throw hr(e) ? new mr("Maxsen is not answering yet") : e;
+				throw yr(e) ? new vr("Maxsen is not answering yet") : e;
 			});
 			if (n !== this._run) return;
 			this._home = i, this._status = "ready";
@@ -4567,9 +4599,9 @@ var vr = class extends V {
 			this._unsubscribe = a, this._attempt = 0;
 		} catch (t) {
 			if (n !== this._run) return;
-			e && this._home || (this._status = t instanceof mr && this._attempt < fr.length ? "starting" : "error"), this._retryTimer = setTimeout(() => {
+			e && this._home || (this._status = t instanceof vr && this._attempt < gr.length ? "starting" : "error"), this._retryTimer = setTimeout(() => {
 				this._retryTimer = void 0, n === this._run && this._resubscribe();
-			}, gr(this._attempt++));
+			}, br(this._attempt++));
 		}
 	}
 	async _reload(e) {
@@ -4601,7 +4633,7 @@ var vr = class extends V {
               class="view"
               .hass=${this.hass}
               .home=${this._home}
-              .selected=${e ? this._selected : dr}
+              .selected=${e ? this._selected : hr}
               .current=${e ? this._current : void 0}
               mode=${e ? "link" : "use"}
               @maxsen-element-tap=${this._onElementTap}
@@ -4730,9 +4762,9 @@ var vr = class extends V {
     }
   `;
 };
-customElements.get("maxsen-home-panel") || customElements.define("maxsen-home-panel", vr);
+customElements.get("maxsen-home-panel") || customElements.define("maxsen-home-panel", Sr);
 // src/maxsen-floorplan-card.ts
-var yr = class extends V {
+var Cr = class extends V {
 	static properties = {
 		hass: { attribute: !1 },
 		_panel: { state: !0 }
@@ -4765,10 +4797,10 @@ var yr = class extends V {
     }
   `;
 };
-customElements.get("maxsen-floorplan-card") || customElements.define("maxsen-floorplan-card", yr), window.customCards = window.customCards ?? [], window.customCards.some((e) => e.type === "maxsen-floorplan-card") || window.customCards.push({
+customElements.get("maxsen-floorplan-card") || customElements.define("maxsen-floorplan-card", Cr), window.customCards = window.customCards ?? [], window.customCards.some((e) => e.type === "maxsen-floorplan-card") || window.customCards.push({
 	type: "maxsen-floorplan-card",
 	name: "Maxsen floor plan",
 	description: "The floor plans of your Maxsen home, with live device state.",
 	preview: !1
 });
-export { _ as LIGHTING_CATEGORIES, yr as MaxsenFloorplanCard, mn as MaxsenFloorplanView, vr as MaxsenHomePanel, lr as MaxsenLinkMode, Mn as MaxsenQuickPanel, we as createStarterScenes, ge as findEntry, _e as getHome, ye as identify, _r as layoutFor, he as linkCandidates, Te as loadImage, Ce as refreshApply, Se as refreshPreview, gr as retryDelay, u as sceneToSvg, xe as setDisplay, v as setLinks, be as setQuickPanel, ve as subscribe, cr as summaryLine, Ee as uploadHomeFile, g as visualState };
+export { _ as LIGHTING_CATEGORIES, Cr as MaxsenFloorplanCard, mn as MaxsenFloorplanView, Sr as MaxsenHomePanel, pr as MaxsenLinkMode, Mn as MaxsenQuickPanel, we as createStarterScenes, ge as findEntry, _e as getHome, ye as identify, xr as layoutFor, he as linkCandidates, Te as loadImage, Ce as refreshApply, Se as refreshPreview, br as retryDelay, u as sceneToSvg, xe as setDisplay, v as setLinks, be as setQuickPanel, ve as subscribe, fr as summaryLine, Ee as uploadHomeFile, g as visualState };

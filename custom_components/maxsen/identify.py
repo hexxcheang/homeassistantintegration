@@ -165,6 +165,10 @@ class Identifier:
 
     @callback
     def _handle_state_changed(self, event: Event) -> None:
+        # A change made through Home Assistant by a person or an app (Check all, the dashboard)
+        # carries that user; a press on the device itself never does.
+        if event.context.user_id:
+            return
         entity_id = event.data["entity_id"]
         old, new = event.data.get("old_state"), event.data.get("new_state")
         domain = split_entity_id(entity_id)[0]

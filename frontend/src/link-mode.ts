@@ -227,9 +227,10 @@ export class MaxsenLinkMode extends LitElement {
     // A load that is switched goes back now, wherever the installer went.
     const check = this._check;
     this._check = undefined;
+    document.removeEventListener('visibilitychange', this._onVisibility);
     if (check) {
       check.token++;
-      void check.all.abort();
+      void check.all.abort(false); // nobody is left to listen: no waiting for the load to report
     }
     this._walk = undefined;
     this._group = undefined;
@@ -809,6 +810,7 @@ export class MaxsenLinkMode extends LitElement {
       wrongElements: [],
       token: 0,
     };
+    document.addEventListener('visibilitychange', this._onVisibility);
     this._check = check; // before anything else: a second press of the button, and `_listen`, see it
     this._stopListening();
     this._armed = false;
@@ -820,6 +822,13 @@ export class MaxsenLinkMode extends LitElement {
     await this._subscribing;
     if (this._check === check) void this._runCheckStep();
   }
+
+  /** A phone that is locked or backgrounded mid-step: put the load back now, not when the page wakes up. */
+  private _onVisibility = (): void => {
+    const check = this._check;
+    if (document.visibilityState !== 'hidden' || !check || check.phase !== 'running') return;
+    void check.all.abort();
+  };
 
   /** The step Check all is on: highlight it, switch it, put it back, and ask. */
   private async _runCheckStep(): Promise<void> {
@@ -840,15 +849,25 @@ export class MaxsenLinkMode extends LitElement {
     const token = ++check.token;
     check.phase = 'running';
     check.problem = undefined;
-    this._select(step.elementIds);
+    this._select(step.highlightIds);
     this.requestUpdate();
     const outcome = await check.all.run(step);
-    if ('restored' in outcome && !outcome.restored && this.isConnected) {
-      this._say(`Could not put ${step.label} back. Check it by hand.`, true);
+    const notBack = 'restored' in outcome && !outcome.restored;
+    if (this._check !== check || check.token !== token) {
+      // Stopped, or the installer left: there is no bar to show it in.
+      if (notBack && this.isConnected) this._say(`Could not put ${step.label} back. Check it by hand.`, true);
+      return;
     }
-    if (this._check !== check || check.token !== token) return;
-    if (outcome.status === 'done') {
+    if (notBack) {
+      // Shown until the installer has looked: it must be put back by hand.
+      check.phase = 'problem';
+      check.problem = `Could not put ${step.label} back. Check it by hand.`;
+    } else if (outcome.status === 'done') {
       check.phase = 'asking';
+    } else if (outcome.status === 'cancelled') {
+      // The screen turned off (see `_onVisibility`): it is back, and has not been judged.
+      check.phase = 'problem';
+      check.problem = `${step.label} was put back when the screen turned off. Run it again.`;
     } else if (outcome.status === 'unavailable') {
       check.phase = 'problem';
       check.problem = `${step.label} is unavailable, so it was not switched.`;
@@ -856,7 +875,7 @@ export class MaxsenLinkMode extends LitElement {
       check.phase = 'problem';
       check.problem = `Could not switch ${step.label}: ${outcome.message}`;
     } else {
-      return; // cancelled or busy: whoever did that is moving on
+      return; // busy: cannot happen, one step at a time
     }
     this.requestUpdate();
   }
@@ -927,6 +946,7 @@ export class MaxsenLinkMode extends LitElement {
     await check.all.abort();
     if (this._check !== check) return; // link mode was closed meanwhile
     this._check = undefined;
+    document.removeEventListener('visibilitychange', this._onVisibility);
     this._select([]);
     const [first] = check.wrongElements;
     const walk = this._walk;
@@ -1319,7 +1339,11 @@ export class MaxsenLinkMode extends LitElement {
             ${phase === 'problem'
               ? html`<p class="check-prompt check-problem" role="alert">${check.problem}</p>`
               : html`<p class="check-prompt" role="status">
-                  ${phase === 'asking' ? 'Was it the right one?' : 'Watch now. It switches for 2 seconds, then goes back.'}
+                  ${phase === 'asking'
+                    ? 'Was it the right one?'
+                    : phase === 'ending'
+                      ? 'Putting it back…'
+                      : 'Watch now. It switches for 2 seconds, then goes back.'}
                 </p>`}
             <div class="check-actions">
               ${phase === 'asking'

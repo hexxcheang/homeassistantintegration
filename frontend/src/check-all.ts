@@ -6,6 +6,13 @@ import { orderedElements } from './walk.ts';
 /** How long a load stays switched before it goes back. */
 export const CHECK_MS = 2000;
 
+/** How often a put-back is looked at while waiting for it to land, and how long a switch or a curtain may take. */
+const SETTLE_POLL_MS = 100;
+const SETTLE_SWITCH_MS = 3000;
+const SETTLE_COVER_MS = 60_000;
+/** A curtain counts as back at its position within this many percent. */
+const POSITION_TOLERANCE = 2;
+
 /** Home Assistant's `CoverEntityFeature` bits. */
 const COVER_SET_POSITION = 4;
 const COVER_STOP = 8;
@@ -24,6 +31,8 @@ export interface CheckStep {
   entityIds: string[];
   /** The planner elements that are linked to them, which Wrong unlinks and puts back in the walk. */
   elementIds: string[];
+  /** What to light up on the drawing: `elementIds`, plus the switch whose gang this is. */
+  highlightIds: string[];
 }
 
 export type CheckOutcome =
@@ -46,6 +55,8 @@ interface Memo {
 
 interface Active {
   cancelled: boolean;
+  /** Do not wait for the put-back to land (the installer has left). */
+  skipSettle: boolean;
   timer: ReturnType<typeof setTimeout> | undefined;
   wake: (() => void) | undefined;
   done: Promise<unknown>;
@@ -83,6 +94,8 @@ function checkedBy(el: HomeElement): { lights: boolean; domains: ReadonlySet<str
  */
 export class CheckAll {
   private active: Active | undefined;
+  /** What each step's entities were the first time it ran, which every run of that step goes back to. */
+  private memos = new Map<string, Memo[]>();
 
   constructor(
     /** Replaced whenever Home Assistant sends a new state: a step reads the live states when it runs. */
@@ -120,19 +133,30 @@ export class CheckAll {
     if (link.type === 'entity') return domains.has(domainOf(link.id)) ? [link.id] : [];
     return deviceEntities(this.hass, link.id)
       .map((e) => e.entity_id)
-      .filter((id) => domains.has(domainOf(id)));
+      .filter((id) => domains.has(domainOf(id)))
+      .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
   }
 
   private stepOf(d: Draft): CheckStep {
     const watched = d.lights.length > 0 ? d.lights : d.others;
     const names = watched.map(nameOf);
-    const label =
-      d.lights.length > 0
-        ? names.length === 1
-          ? names[0]!
-          : `${names[0]} and ${names.length - 1} more`
-        : `${names[0]}${d.gang ? ` · gang ${d.gang.index} of ${d.gang.count}` : ''}`;
-    return { label, levelName: d.levelName, entityIds: [d.entityId], elementIds: watched.map((e) => e.id) };
+    const gang = d.gang ? `gang ${d.gang.index} of ${d.gang.count}` : '';
+    let label: string;
+    if (d.lights.length === 0) {
+      label = `${names[0]}${gang ? ` · ${gang}` : ''}`;
+    } else {
+      label = names.length === 1 ? names[0]! : `${names[0]} and ${names.length - 1} more`;
+      // The gang also belongs to a linked switch: say which, so the installer can look at it.
+      const via = d.others[0];
+      if (via) label += ` · via ${nameOf(via)}${gang ? `, ${gang}` : ''}`;
+    }
+    return {
+      label,
+      levelName: d.levelName,
+      entityIds: [d.entityId],
+      elementIds: watched.map((e) => e.id),
+      highlightIds: [...watched, ...(d.lights.length > 0 ? d.others : [])].map((e) => e.id),
+    };
   }
 
   /** The entities of a step that Home Assistant cannot switch right now: unavailable, unknown or gone. */
@@ -152,8 +176,13 @@ export class CheckAll {
     if (this.active) return Promise.resolve({ status: 'busy' });
     const missing = this.unavailable(step);
     if (missing.length > 0) return Promise.resolve({ status: 'unavailable', entityIds: missing });
-    const memos = step.entityIds.map((id) => this.remember(id));
-    const active: Active = { cancelled: false, timer: undefined, wake: undefined, done: Promise.resolve() };
+    const key = step.entityIds.join(',');
+    let memos = this.memos.get(key);
+    if (!memos) {
+      memos = step.entityIds.map((id) => this.remember(id));
+      this.memos.set(key, memos);
+    }
+    const active: Active = { cancelled: false, skipSettle: false, timer: undefined, wake: undefined, done: Promise.resolve() };
     this.active = active;
     active.done = this.execute(memos, active).finally(() => {
       if (this.active === active) this.active = undefined;
@@ -161,11 +190,16 @@ export class CheckAll {
     return active.done as Promise<CheckOutcome>;
   }
 
-  /** Ends the step that is running, if any, at once; resolves when its loads are back. */
-  async abort(): Promise<void> {
+  /**
+   * Ends the step that is running, if any, at once; resolves when its loads are back and have
+   * reported it (so nothing that listens for presses hears the put-back). With `settle` false it
+   * does not wait for that: for an installer who has gone.
+   */
+  async abort(settle = true): Promise<void> {
     const active = this.active;
     if (!active) return;
     active.cancelled = true;
+    if (!settle) active.skipSettle = true;
     clearTimeout(active.timer);
     active.wake?.();
     await active.done;
@@ -186,6 +220,9 @@ export class CheckAll {
     // Always put back: a call that failed may still have moved the load.
     const putBack = await Promise.allSettled(memos.map((m) => this.putBack(m)));
     const restored = putBack.every((r) => r.status === 'fulfilled');
+    // The put-back has been asked for; Zigbee reports it a moment later, and a curtain keeps
+    // travelling. Until it has, a listener would take those reports for presses.
+    await Promise.all(memos.map((m) => this.settled(m, active)));
     if (failure !== undefined) return { status: 'failed', message: failure, restored };
     return active.cancelled ? { status: 'cancelled', restored } : { status: 'done', restored };
   }
@@ -196,6 +233,29 @@ export class CheckAll {
       active.wake = resolve;
       active.timer = setTimeout(resolve, CHECK_MS);
     });
+  }
+
+  /** Waits until `m` is back where it was (or the cap runs out, quietly). */
+  private async settled(m: Memo, active: Active): Promise<void> {
+    const cap = m.domain === 'cover' ? SETTLE_COVER_MS : SETTLE_SWITCH_MS;
+    for (let waited = 0; waited < cap && !active.skipSettle && !this.isBack(m); waited += SETTLE_POLL_MS) {
+      await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS));
+    }
+  }
+
+  private isBack(m: Memo): boolean {
+    const now = this.hass.states[m.id];
+    if (!now) return true; // gone: nothing to wait for
+    if (m.domain !== 'cover') return now.state === m.state;
+    if (now.state === 'opening' || now.state === 'closing') return false;
+    const closed = m.state === 'closed' || m.state === 'closing';
+    if (now.state !== (closed ? 'closed' : 'open')) return false;
+    const target = m.attributes['current_position'];
+    const at = now.attributes['current_position'];
+    if (typeof target === 'number' && typeof at === 'number' && this.supports(m, COVER_SET_POSITION, true)) {
+      return Math.abs(at - target) <= POSITION_TOLERANCE;
+    }
+    return true;
   }
 
   private async switchAway(m: Memo): Promise<void> {

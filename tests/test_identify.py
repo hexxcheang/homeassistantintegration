@@ -512,3 +512,27 @@ async def test_switching_installer_mode_off_ends_the_subscription(
     await flip(hass, "switch.hall_1")
     await window(hass, freezer)
     await assert_nothing_pushed(ws)  # no second "stopped", no names
+
+
+async def test_a_change_made_through_home_assistant_by_a_user_is_not_a_press(
+    hass, hass_ws_client, entry, freezer
+):
+    """Check all (and the dashboard) switch loads as a user: that is never a physical press."""
+    from homeassistant.core import Context
+
+    add_device(hass, "Hall", [("switch", "hall_1")], user_name="Hall switch")
+    ws = await hass_ws_client()
+    await subscribe(ws, entry)
+
+    hass.states.async_set("switch.hall_1", "on", context=Context(user_id="user-1"))
+    await hass.async_block_till_done()
+    await window(hass, freezer)
+    await assert_nothing_pushed(ws)
+
+    # The same change without a user (the device itself reporting) still counts.
+    hass.states.async_set("switch.hall_1", "off", context=Context(user_id="user-1"))
+    await hass.async_block_till_done()
+    await flip(hass, "switch.hall_1")
+    await window(hass, freezer)
+    resp = await ws.receive_json()
+    assert resp["event"]["name"] == "Hall switch"

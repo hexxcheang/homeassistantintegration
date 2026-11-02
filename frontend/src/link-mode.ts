@@ -270,13 +270,14 @@ export class MaxsenLinkMode extends LitElement {
   // ---- linking ----
 
   /**
-   * Link the selected elements to `link` (or unlink them). `nameDevice` also names a device after
-   * its marker and puts it in its level's area; `name` is what the notice calls the link.
+   * Link the selected elements to `link` (or unlink them). A device link also names the device
+   * after its marker and puts it in its level's area, however the link was made (the server leaves
+   * a device a person named alone); `name` is what the notice calls the link.
    * Resolves to whether the link was saved.
    */
   private async _link(
     link: Link | null,
-    options: { nameDevice?: boolean; name?: string } = {},
+    options: { name?: string } = {},
   ): Promise<boolean> {
     const { hass, entryId } = this;
     if (!hass || !entryId || this._busy) return false;
@@ -285,7 +286,7 @@ export class MaxsenLinkMode extends LitElement {
     this._busy = true;
     try {
       await setLinks(hass, entryId, Object.fromEntries(targets.map((id) => [id, link])), {
-        nameDevice: options.nameDevice && link?.type === 'device',
+        nameDevice: link?.type === 'device',
       });
       const many = targets.length > 1;
       const verb = link === null ? 'Unlinked' : 'Linked';
@@ -427,10 +428,7 @@ export class MaxsenLinkMode extends LitElement {
     const link = this._linkOf(result);
     // The installer may have selected something else while the press was on its way.
     if (this._selected.length !== 1 || this._selected[0] !== step.elementId) return;
-    const saved = await this._link(link, {
-      nameDevice: link.type === 'device',
-      name: this._nameOf(link, result.name),
-    });
+    const saved = await this._link(link, { name: this._nameOf(link, result.name) });
     if (!saved) {
       // Still selected: listen again.
       this._singleKey = '';
@@ -867,7 +865,7 @@ export class MaxsenLinkMode extends LitElement {
                 })}
                 data-link-id=${c.link.id}
                 ?disabled=${this._busy}
-                @click=${() => void this._link(c.link, { nameDevice: this._walk !== undefined })}
+                @click=${() => void this._link(c.link)}
               >
                 <span class="name">${c.name}</span>
                 <span class="sub">${[c.area, c.detail].filter(Boolean).join(' · ')}</span>

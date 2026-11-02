@@ -3161,7 +3161,7 @@ var Qn = class extends V {
 		if (i.length === 0) return !1;
 		this._busy = !0;
 		try {
-			await v(n, r, Object.fromEntries(i.map((t) => [t, e])), { nameDevice: t.nameDevice && e?.type === "device" });
+			await v(n, r, Object.fromEntries(i.map((t) => [t, e])), { nameDevice: e?.type === "device" });
 			let a = i.length > 1, o = e === null ? "Unlinked" : "Linked";
 			return this._say(a ? `${o} ${i.length} elements.` : t.name ? `${o}: ${t.name}` : `${o}.`, !1), this._select([]), e && this._walk && this._pickedInWalk(i, e), !0;
 		} catch (e) {
@@ -3240,10 +3240,7 @@ var Qn = class extends V {
 		if (!Jn(t)) return;
 		this._stopListening(), this._ambiguous = !1;
 		let n = this._linkOf(t);
-		this._selected.length === 1 && this._selected[0] === e.elementId && (await this._link(n, {
-			nameDevice: n.type === "device",
-			name: this._nameOf(n, t.name)
-		}) || (this._singleKey = "", this._syncSingle()));
+		this._selected.length === 1 && this._selected[0] === e.elementId && (await this._link(n, { name: this._nameOf(n, t.name) }) || (this._singleKey = "", this._syncSingle()));
 	}
 	_startWalk() {
 		let e = this.home;
@@ -3566,7 +3563,7 @@ var Qn = class extends V {
 		})}
                 data-link-id=${e.link.id}
                 ?disabled=${this._busy}
-                @click=${() => void this._link(e.link, { nameDevice: this._walk !== void 0 })}
+                @click=${() => void this._link(e.link)}
               >
                 <span class="name">${e.name}</span>
                 <span class="sub">${[e.area, e.detail].filter(Boolean).join(" · ")}</span>

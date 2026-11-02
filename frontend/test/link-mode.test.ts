@@ -319,12 +319,28 @@ describe('choosing what to link to', () => {
     click(q(el, '.candidate[data-link-id="dev-hall"]'));
     await settle(el);
 
+    // A device picked by hand is named after its marker, like one found by a press.
     expect(callWS).toHaveBeenCalledWith({
       type: 'maxsen/links/set',
       entry_id: 'e1',
       updates: { sw1: HALL },
+      name_device: true,
     });
     expect(text(q(el, '.notice'))).toBe('Linked.');
+  });
+
+  it('asks for no naming when it links lights to an entity or unlinks', async () => {
+    const { el, callWS } = await mount(homeResponse({ installer_mode: true, links: { sw1: HALL } }));
+    await tapElement(el, 'dl1');
+    click(q(el, '.candidate[data-link-id="switch.l1_gang2"]'));
+    await settle(el);
+    await tapElement(el, 'sw1');
+    click(q(el, '.unlink'));
+    await settle(el);
+    expect(callWS.mock.calls.map((c) => c[0])).toEqual([
+      { type: 'maxsen/links/set', entry_id: 'e1', updates: { dl1: GANG2 } },
+      { type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: null } },
+    ]);
   });
 
   it('shows what the element is linked to now, and marks that candidate', async () => {

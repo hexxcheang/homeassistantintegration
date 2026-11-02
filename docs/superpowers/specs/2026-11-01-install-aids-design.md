@@ -1,7 +1,7 @@
 # Maxsen Home: Install Aids (linking walk) — Design
 
 Date: 2026-11-01
-Status: Draft, awaiting approval
+Status: Approved 2026-11-02
 Builds on: `2026-11-01-maxsen-floorplan-dashboard-design.md`, `2026-11-01-panel-polish-design.md`
 
 ## Why

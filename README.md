@@ -134,6 +134,8 @@ checklist*, step 1).
   Assistant.
 - Outside the walk you can do one element at a time: tap it, switch on **Listen**, then press the
   device.
+- Only one phone can run the walk at a time. When a second phone starts listening, the first one
+  stops with "The walk stopped. Open Installer to carry on."
 - Only Zigbee devices (Zigbee2MQTT or ZHA) are noticed. Switch on **Include other devices** only
   for an install that does not use Zigbee.
 

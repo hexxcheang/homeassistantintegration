@@ -542,3 +542,75 @@ async def test_image_view_serves_a_jpeg_with_the_jpeg_type(hass, hass_client, en
     assert resp.status == 200
     assert resp.content_type == "image/jpeg"
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
+
+
+# ------------------------------------------------- links/set only_if_unlinked
+
+
+async def link_device(ws, entry, element_id, device_id, **fields):
+    return await call(
+        ws,
+        "maxsen/links/set",
+        entry_id=entry.entry_id,
+        updates={element_id: {"type": "device", "id": device_id}},
+        **fields,
+    )
+
+
+async def test_only_if_unlinked_refuses_a_device_linked_to_another_element(
+    hass, hass_ws_client, entry
+):
+    ws = await hass_ws_client()
+    assert (await link_device(ws, entry, "sw1", "dev-a"))["success"]
+
+    resp = await link_device(ws, entry, "dl1", "dev-a", only_if_unlinked=True)
+
+    assert not resp["success"]
+    assert resp["error"]["code"] == "already_linked"
+    assert entry.runtime_data.data["links"] == {"sw1": {"type": "device", "id": "dev-a"}}
+
+
+async def test_only_if_unlinked_allows_an_unlinked_device_and_the_same_element(
+    hass, hass_ws_client, entry
+):
+    ws = await hass_ws_client()
+    assert (await link_device(ws, entry, "sw1", "dev-a", only_if_unlinked=True))["success"]
+    # Linking the element again to the device it already has is not a second marker.
+    assert (await link_device(ws, entry, "sw1", "dev-a", only_if_unlinked=True))["success"]
+    # An entity link to a gang never counts: only device links do.
+    resp = await call(
+        ws,
+        "maxsen/links/set",
+        entry_id=entry.entry_id,
+        updates={"dl1": {"type": "entity", "id": "light.kitchen"}},
+        only_if_unlinked=True,
+    )
+    assert resp["success"]
+
+
+async def test_without_only_if_unlinked_a_device_can_be_linked_twice(
+    hass, hass_ws_client, entry
+):
+    """Manual linking is allowed to move or share a device."""
+    ws = await hass_ws_client()
+    assert (await link_device(ws, entry, "sw1", "dev-a"))["success"]
+    assert (await link_device(ws, entry, "dl1", "dev-a"))["success"]
+
+
+async def test_only_if_unlinked_refusal_saves_nothing_from_the_same_request(
+    hass, hass_ws_client, entry
+):
+    ws = await hass_ws_client()
+    assert (await link_device(ws, entry, "sw1", "dev-a"))["success"]
+    resp = await call(
+        ws,
+        "maxsen/links/set",
+        entry_id=entry.entry_id,
+        updates={
+            "dl1": {"type": "entity", "id": "light.kitchen"},
+            "dl2": {"type": "device", "id": "dev-a"},
+        },
+        only_if_unlinked=True,
+    )
+    assert resp["error"]["code"] == "already_linked"
+    assert entry.runtime_data.data["links"] == {"sw1": {"type": "device", "id": "dev-a"}}

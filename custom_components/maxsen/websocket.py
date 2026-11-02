@@ -148,6 +148,9 @@ def ws_home(
         vol.Required("entry_id"): str,
         vol.Required("updates"): {_ID: _LINK},
         vol.Optional("name_device", default=False): bool,
+        # Refuse (save nothing) a device link to a device that another element
+        # already has a device link to. Press-to-identify sends it.
+        vol.Optional("only_if_unlinked", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -175,6 +178,22 @@ async def ws_links_set(
                 msg["id"], "invalid_element", "An element is not in this home"
             )
             return
+        if msg["only_if_unlinked"]:
+            taken = {
+                link["id"]
+                for element_id, link in store.data["links"].items()
+                if link["type"] == "device" and element_id not in updates
+            }
+            if any(
+                link is not None and link["type"] == "device" and link["id"] in taken
+                for link in updates.values()
+            ):
+                connection.send_error(
+                    msg["id"],
+                    "already_linked",
+                    "That device is already linked to another element",
+                )
+                return
         try:
             plan = plan_for_links(
                 hass, store.data, updates, known, name_device=msg["name_device"]
@@ -468,13 +487,15 @@ async def ws_identify_subscribe(
     """Push what the installer presses: {device_id|entity_id, name} or {"ambiguous": true}.
 
     Needs an admin and installer mode, checked here. Only changes after this
-    call count; unsubscribing stops the listener.
+    call count; unsubscribing stops the listener. A home has one subscription at
+    a time: a new one stops the older with {"stopped": true}.
     """
     if (entry := _loaded_entry_or_error(hass, connection, msg)) is None:
         return
     if not _installer_only(connection, msg, entry, "Identifying"):
         return
 
+    store = entry.runtime_data
     identifier = Identifier(
         hass,
         entry,
@@ -486,6 +507,17 @@ async def ws_identify_subscribe(
             websocket_api.event_message(msg["id"], result)
         ),
     )
+    # Replace the older listener first, in one step with registering this one.
+    if store.identifier is not None:
+        store.identifier.stop_replaced()
+    store.identifier = identifier
+
+    @callback
+    def _unsubscribe() -> None:
+        identifier.stop()
+        if store.identifier is identifier:
+            store.identifier = None
+
     await identifier.async_start()
-    connection.subscriptions[msg["id"]] = identifier.stop
+    connection.subscriptions[msg["id"]] = _unsubscribe
     connection.send_result(msg["id"])

@@ -128,6 +128,13 @@ class Identifier:
             event_filter=_watches_entity,
         )
 
+    def stop_replaced(self) -> None:
+        """Stop because another phone started listening: tell this one, once."""
+        if not self._stopped:
+            self._stopped = True
+            self._on_result({"stopped": True})
+        self.stop()
+
     def stop(self) -> None:
         """Stop listening and drop any candidate still waiting."""
         self._stopped = True

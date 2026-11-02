@@ -6,7 +6,7 @@ import asyncio
 import secrets
 from datetime import datetime, timedelta
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -15,6 +15,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import EVENT_QUICK_PANEL_UPDATED, SIGNAL_UPDATED
 from .scene import StarterScene, build_starter_scenes, starter_entity_ids
+
+if TYPE_CHECKING:
+    from .identify import Identifier
 
 STORAGE_VERSION = 1
 PREVIEW_LIFETIME = timedelta(minutes=10)
@@ -58,6 +61,9 @@ class MaxsenStore:
         # The one live refresh preview: (preview id, expiry, parsed package with
         # images). Memory only; a restart or a newer preview drops it.
         self._preview: tuple[str, datetime, dict[str, Any]] | None = None
+        # The one press-to-identify subscription of this home (memory only): a
+        # second phone listening would link one press to two markers.
+        self.identifier: Identifier | None = None
 
     async def async_load(self) -> None:
         """Load what was saved before; start empty when nothing was."""

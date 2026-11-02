@@ -26,6 +26,7 @@ describe('websocket wrappers', () => {
     await setLinks(hass, 'e1', { dl1: { type: 'entity', id: 'light.a' }, dl2: null });
     await setLinks(hass, 'e1', { sw1: { type: 'device', id: 'd1' } }, { nameDevice: true });
     await setLinks(hass, 'e1', { sw1: null }, { nameDevice: false });
+    await setLinks(hass, 'e1', { sw1: { type: 'device', id: 'd2' } }, { nameDevice: true, onlyIfUnlinked: true });
     await setQuickPanel(hass, 'e1', [{ type: 'element', id: 'dl1' }]);
     await refreshPreview(hass, 'e1');
     await refreshPreview(hass, 'e1', 'file-9');
@@ -47,6 +48,13 @@ describe('websocket wrappers', () => {
         name_device: true,
       },
       { type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: null } },
+      {
+        type: 'maxsen/links/set',
+        entry_id: 'e1',
+        updates: { sw1: { type: 'device', id: 'd2' } },
+        name_device: true,
+        only_if_unlinked: true,
+      },
       { type: 'maxsen/quick_panel/set', entry_id: 'e1', items: [{ type: 'element', id: 'dl1' }] },
       { type: 'maxsen/refresh/preview', entry_id: 'e1' },
       { type: 'maxsen/refresh/preview', entry_id: 'e1', file_id: 'file-9' },

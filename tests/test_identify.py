@@ -91,6 +91,20 @@ async def subscribe(ws, entry, **fields):
     return resp["id"]
 
 
+async def resubscribe(ws, entry, old_id, **fields):
+    """Subscribe again on the same connection: the older one is told it stopped first."""
+    fields.setdefault("mode", "device")
+    fields.setdefault("kinds", ["switch"])
+    await ws.send_json_auto_id(
+        {"type": "maxsen/identify/subscribe", "entry_id": entry.entry_id, **fields}
+    )
+    stopped = await ws.receive_json()
+    assert (stopped["id"], stopped["event"]) == (old_id, {"stopped": True})
+    resp = await ws.receive_json()
+    assert resp["success"], resp
+    return resp["id"]
+
+
 async def flip(hass, entity_id, state="on"):
     hass.states.async_set(entity_id, state)
     await hass.async_block_till_done()
@@ -189,12 +203,12 @@ async def test_a_non_zigbee_device_needs_include_other(
 ):
     device_id = add_device(hass, "Wifi", [("switch", "wifi_1")], domain="hue")
     ws = await hass_ws_client()
-    await subscribe(ws, entry)
+    first = await subscribe(ws, entry)
     await flip(hass, "switch.wifi_1")
     await window(hass, freezer)
     await assert_nothing_pushed(ws)
 
-    await subscribe(ws, entry, include_other=True)
+    await resubscribe(ws, entry, first, include_other=True)
     await flip(hass, "switch.wifi_1", "off")
     await flip(hass, "switch.wifi_1", "on")
     await window(hass, freezer)
@@ -246,13 +260,13 @@ async def test_a_reconnect_is_not_a_press(hass, hass_ws_client, entry, freezer):
 async def test_the_gang_count_must_match(hass, hass_ws_client, entry, freezer):
     add_device(hass, "Two", [("switch", "two_a"), ("switch", "two_b")])
     ws = await hass_ws_client()
-    await subscribe(ws, entry, gangs=3)
+    first = await subscribe(ws, entry, gangs=3)
     await flip(hass, "switch.two_a")
     await window(hass, freezer)
     await assert_nothing_pushed(ws)
 
     two = add_device(hass, "Two b", [("switch", "tb_a"), ("light", "tb_b"), ("switch", "tb_cfg")], config={"tb_cfg"})
-    await subscribe(ws, entry, gangs=2)
+    await resubscribe(ws, entry, first, gangs=2)
     await flip(hass, "light.tb_b")
     await window(hass, freezer)
     assert (await ws.receive_json())["event"]["device_id"] == two
@@ -374,7 +388,7 @@ async def test_cover_and_binary_sensor_kinds(hass, hass_ws_client, entry, freeze
     curtain = add_device(hass, "Curtain", [("cover", "curtain_1")])
     sensor = add_device(hass, "Door", [("binary_sensor", "door_1")])
     ws = await hass_ws_client()
-    await subscribe(ws, entry, kinds=["cover"])
+    first = await subscribe(ws, entry, kinds=["cover"])
     await flip(hass, "binary_sensor.door_1")
     await flip(hass, "switch.nothing")
     await window(hass, freezer)
@@ -383,7 +397,7 @@ async def test_cover_and_binary_sensor_kinds(hass, hass_ws_client, entry, freeze
     await window(hass, freezer)
     assert (await ws.receive_json())["event"]["device_id"] == curtain
 
-    await subscribe(ws, entry, kinds=["binary_sensor"])
+    await resubscribe(ws, entry, first, kinds=["binary_sensor"])
     await flip(hass, "binary_sensor.door_1", "off")
     await window(hass, freezer)
     assert (await ws.receive_json())["event"]["device_id"] == sensor
@@ -536,3 +550,69 @@ async def test_a_change_made_through_home_assistant_by_a_user_is_not_a_press(
     await window(hass, freezer)
     resp = await ws.receive_json()
     assert resp["event"]["name"] == "Hall switch"
+
+
+async def test_a_new_subscription_stops_the_older_one(
+    hass, hass_ws_client, entry, freezer
+):
+    """Two phones listening would report one press twice, and link one device to two markers."""
+    add_device(hass, "Hall", [("switch", "hall_1")], user_name="Hall switch")
+    ws1, ws2 = await hass_ws_client(), await hass_ws_client()
+    before = hass.bus.async_listeners().get("state_changed", 0)
+    first = await subscribe(ws1, entry)
+    second = await subscribe(ws2, entry)
+
+    event = await ws1.receive_json()
+    assert event["id"] == first
+    assert event["event"] == {"stopped": True}
+    assert hass.bus.async_listeners()["state_changed"] == before + 1
+
+    await flip(hass, "switch.hall_1")
+    await window(hass, freezer)
+    event = await ws2.receive_json()
+    assert event["id"] == second
+    assert event["event"]["name"] == "Hall switch"
+    await assert_nothing_pushed(ws1)
+    await assert_nothing_pushed(ws2)
+
+
+async def test_a_second_subscription_on_the_same_connection_stops_the_first(
+    hass, hass_ws_client, entry, freezer
+):
+    add_device(hass, "Hall", [("switch", "hall_1")])
+    ws = await hass_ws_client()
+    first = await subscribe(ws, entry)
+    second = await resubscribe(ws, entry, first)
+
+    await flip(hass, "switch.hall_1")
+    await window(hass, freezer)
+    event = await ws.receive_json()
+    assert event["id"] == second
+    assert "device_id" in event["event"]
+    await assert_nothing_pushed(ws)
+
+
+async def test_unsubscribing_the_stopped_one_does_not_end_the_new_one(
+    hass, hass_ws_client, entry, freezer
+):
+    """A client that re-subscribes also unsubscribes the old id: the new one must live."""
+    add_device(hass, "Hall", [("switch", "hall_1")])
+    ws = await hass_ws_client()
+    first = await subscribe(ws, entry)
+    await resubscribe(ws, entry, first)
+
+    assert (await call(ws, "unsubscribe_events", subscription=first))["success"]
+    await flip(hass, "switch.hall_1")
+    await window(hass, freezer)
+    assert "device_id" in (await ws.receive_json())["event"]
+
+
+async def test_subscribing_after_unsubscribing_stops_nothing(
+    hass, hass_ws_client, entry
+):
+    ws = await hass_ws_client()
+    first = await subscribe(ws, entry)
+    assert (await call(ws, "unsubscribe_events", subscription=first))["success"]
+    await subscribe(ws, entry)
+    await assert_nothing_pushed(ws)
+

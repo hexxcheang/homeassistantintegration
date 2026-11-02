@@ -32,7 +32,14 @@ const MIXED_KINDS = 'Select lights together, or other devices together, not both
 const TOAST_MS = 2000;
 const AMBIGUOUS = 'Two devices reacted. Press once more.';
 const WALK_STOPPED = 'The walk stopped. Open Installer to carry on.';
-const IDENTIFY_STOPPED = 'Identifying stopped because installer mode was switched off.';
+const IDENTIFY_STOPPED = 'Identifying stopped: installer mode was switched off, or another phone is listening.';
+const ALREADY_LINKED = 'That device is already linked to another element. Press a different one.';
+
+/** What to tell the installer when a link was not saved; a device that is taken has its own words. */
+function saveError(err: unknown, fallback: string): string {
+  const code = typeof err === 'object' && err !== null && 'code' in err ? err.code : undefined;
+  return code === 'already_linked' ? ALREADY_LINKED : errorMessage(err, fallback);
+}
 const OTHER_LIGHTS = 'Tap the other lights that came on';
 const NOTHING_TO_CHECK = 'Nothing to check yet. Link a switch, light or curtain first.';
 
@@ -328,7 +335,10 @@ export class MaxsenLinkMode extends LitElement {
    * press, or picked on a walk step, is shown for 2 s as "Linked: …" with Undo, as the walk does.
    * Resolves to whether the link was saved.
    */
-  private async _link(link: Link | null, options: { name?: string; undoable?: boolean } = {}): Promise<boolean> {
+  private async _link(
+    link: Link | null,
+    options: { name?: string; undoable?: boolean; onlyIfUnlinked?: boolean } = {},
+  ): Promise<boolean> {
     const { hass, entryId } = this;
     if (!hass || !entryId || this._busy) return false;
     const targets = link === null ? this._selected.filter((id) => this.home?.links[id]) : this._selected;
@@ -338,6 +348,7 @@ export class MaxsenLinkMode extends LitElement {
     try {
       await setLinks(hass, entryId, Object.fromEntries(targets.map((id) => [id, link])), {
         nameDevice: link?.type === 'device',
+        onlyIfUnlinked: options.onlyIfUnlinked && link?.type === 'device',
       });
       const step = this._walk?.current;
       const picked = step?.kind === 'pick' && targets.includes(step.elementId);
@@ -354,7 +365,7 @@ export class MaxsenLinkMode extends LitElement {
       }
       return true;
     } catch (err) {
-      this._say(errorMessage(err, 'Could not save the link. Try again.'), true);
+      this._say(saveError(err, 'Could not save the link. Try again.'), true);
       return false;
     } finally {
       this._busy = false;
@@ -509,7 +520,11 @@ export class MaxsenLinkMode extends LitElement {
     const link = this._linkOf(result);
     // The installer may have selected something else while the press was on its way.
     if (this._selected.length !== 1 || this._selected[0] !== step.elementId) return;
-    const saved = await this._link(link, { name: this._nameOf(link, result.name), undoable: true });
+    const saved = await this._link(link, {
+      name: this._nameOf(link, result.name),
+      undoable: true,
+      onlyIfUnlinked: true,
+    });
     if (!saved) {
       // Still selected: listen again.
       this._singleKey = '';
@@ -599,10 +614,10 @@ export class MaxsenLinkMode extends LitElement {
     const previous = { [el]: this._walkHome()?.links[el] ?? null };
     this._phase = 'linking';
     try {
-      await setLinks(hass, entryId, { [el]: link }, { nameDevice: step.kind === 'device' });
+      await setLinks(hass, entryId, { [el]: link }, { nameDevice: step.kind === 'device', onlyIfUnlinked: step.kind === 'device' });
     } catch (err) {
       if (this._walk !== walk) return;
-      this._say(errorMessage(err, 'Could not save the link. Try again.'), true);
+      this._say(saveError(err, 'Could not save the link. Try again.'), true);
       this._phase = 'waiting';
       this._listenForStep(step);
       return;

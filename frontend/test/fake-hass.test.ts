@@ -382,6 +382,29 @@ describe('createFakeHass: websocket', () => {
     ).rejects.toMatchObject({ code: 'invalid_format' });
   });
 
+  it('maxsen/links/set with only_if_unlinked refuses a device another element is linked to, and saves nothing', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const swDevice = (await getHome(fake)).links['sw1']!;
+    await expect(
+      ws(fake, {
+        type: 'maxsen/links/set',
+        updates: { dl1: null, cur1: swDevice },
+        only_if_unlinked: true,
+      }),
+    ).rejects.toMatchObject({ code: 'already_linked' });
+    const after = (await getHome(fake)).links;
+    expect(after['cur1']).not.toEqual(swDevice);
+    expect(after['dl1']).toBeDefined();
+
+    // The same element again, a device nothing links to, and a gang are all fine; without the option so is a second link.
+    await ws(fake, { type: 'maxsen/links/set', updates: { sw1: null } });
+    await ws(fake, { type: 'maxsen/links/set', updates: { sw1: swDevice }, only_if_unlinked: true });
+    await ws(fake, { type: 'maxsen/links/set', updates: { cur1: swDevice } });
+    await expect(
+      ws(fake, { type: 'maxsen/links/set', updates: {}, only_if_unlinked: 'yes' }),
+    ).rejects.toMatchObject({ code: 'invalid_format' });
+  });
+
   it('follows admin and installer mode changes live', async () => {
     const fake = createFakeHass(fresh(), { admin: true, installerMode: false });
     const events: string[] = [];
@@ -1030,10 +1053,13 @@ describe('maxsen/identify/subscribe', () => {
     const fake = createFakeHass(fresh(), admin);
     const plug = wifiPlug(fake);
     const only = await listen(fake, { mode: 'device', kinds: ['switch'] });
-    const all = await listen(fake, { mode: 'device', kinds: ['switch'], include_other: true });
     fake.press(plug.entityId);
     vi.advanceTimersByTime(1100);
     expect(only.got).toEqual([]);
+
+    const all = await listen(fake, { mode: 'device', kinds: ['switch'], include_other: true });
+    fake.press(plug.entityId);
+    vi.advanceTimersByTime(1100);
     expect(all.got).toEqual([{ device_id: plug.deviceId, name: 'Hallway smart plug' }]);
   });
 
@@ -1042,10 +1068,13 @@ describe('maxsen/identify/subscribe', () => {
     const fake = createFakeHass(fresh(), admin);
     await unlink(fake, 'sw1');
     const two = await listen(fake, { mode: 'device', kinds: ['switch'], gangs: 2 });
-    const three = await listen(fake, { mode: 'device', kinds: ['switch'], gangs: 3 });
     fake.press('switch.entrance_switch_1'); // 3 primary gangs and one backlight setting
     vi.advanceTimersByTime(1100);
     expect(two.got).toEqual([]);
+
+    const three = await listen(fake, { mode: 'device', kinds: ['switch'], gangs: 3 });
+    fake.press('switch.entrance_switch_1');
+    vi.advanceTimersByTime(1100);
     expect(three.got).toEqual([{ device_id: 'device_sw1', name: 'Entrance switch' }]);
   });
 
@@ -1054,16 +1083,23 @@ describe('maxsen/identify/subscribe', () => {
     const fake = createFakeHass(fresh(), admin);
     await unlink(fake, 'sw1', 'cur1', 'sen1');
     const covers = await listen(fake, { mode: 'device', kinds: ['cover'] });
-    const sensors = await listen(fake, { mode: 'device', kinds: ['binary_sensor'] });
     fake.press('switch.entrance_switch_1');
-    vi.advanceTimersByTime(1100);
-    expect(covers.got).toEqual([]);
-    expect(sensors.got).toEqual([]);
-
-    fake.press('cover.smart_curtain_track');
     fake.press('binary_sensor.door_window_sensor_door');
     vi.advanceTimersByTime(1100);
+    expect(covers.got).toEqual([]);
+
+    fake.press('cover.smart_curtain_track');
+    vi.advanceTimersByTime(1100);
     expect(covers.got).toEqual([{ device_id: 'device_cur1', name: 'Smart Curtain Track' }]);
+
+    const sensors = await listen(fake, { mode: 'device', kinds: ['binary_sensor'] });
+    fake.press('switch.entrance_switch_1');
+    fake.press('cover.smart_curtain_track');
+    vi.advanceTimersByTime(1100);
+    expect(sensors.got).toEqual([]);
+
+    fake.press('binary_sensor.door_window_sensor_door');
+    vi.advanceTimersByTime(1100);
     expect(sensors.got).toEqual([{ device_id: 'device_sen1', name: 'Door/Window Sensor' }]);
   });
 
@@ -1126,11 +1162,15 @@ describe('maxsen/identify/subscribe', () => {
     const fake = createFakeHass(fresh(), admin);
     const plug = wifiPlug(fake);
     const only = await listen(fake, { mode: 'entity', kinds: ['light_gang'] });
-    const all = await listen(fake, { mode: 'entity', kinds: ['light_gang'], include_other: true });
     fake.press(plug.entityId); // on -> off
     fake.press(plug.entityId); // off -> on
     vi.advanceTimersByTime(1100);
     expect(only.got).toEqual([]);
+
+    const all = await listen(fake, { mode: 'entity', kinds: ['light_gang'], include_other: true });
+    fake.press(plug.entityId); // on -> off
+    fake.press(plug.entityId); // off -> on
+    vi.advanceTimersByTime(1100);
     expect(all.got).toEqual([{ entity_id: plug.entityId, name: 'Hallway smart plug' }]);
   });
 
@@ -1166,6 +1206,26 @@ describe('maxsen/identify/subscribe', () => {
     fake.openHome(fresh());
     expect(got).toEqual([{ stopped: true }]);
     expect(wifiPlug(fake).entityId).toBe('switch.hallway_smart_plug');
+  });
+
+  it('keeps one subscription per home: a new one stops the older with "stopped" and takes over', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHass(fresh(), admin);
+    await unlink(fake, 'sw1');
+    const older = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    const newer = await listen(fake, { mode: 'device', kinds: ['switch'] });
+    expect(older.got).toEqual([{ stopped: true }]);
+
+    fake.press('switch.entrance_switch_1');
+    vi.advanceTimersByTime(1100);
+    expect(newer.got).toEqual([{ device_id: 'device_sw1', name: 'Entrance switch' }]);
+    expect(older.got).toEqual([{ stopped: true }]); // told once, then quiet
+
+    // Ending the replaced one later is harmless, and does not end the new one.
+    await older.stop();
+    await unlink(fake, 'cur1');
+    fake.press('cover.smart_curtain_track');
+    expect(newer.got).toHaveLength(1);
   });
 
   it('is for administrators in installer mode only', async () => {

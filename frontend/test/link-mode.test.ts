@@ -906,7 +906,7 @@ describe('linking walk', () => {
       await press(w, { device_id: 'dev-motion', name: 'Motion puck' });
 
       expect(linkCalls(w)).toEqual([
-        { type: 'maxsen/links/set', entry_id: 'e1', updates: { cur1: MOTION }, name_device: true },
+        { type: 'maxsen/links/set', entry_id: 'e1', updates: { cur1: MOTION }, name_device: true, only_if_unlinked: true },
       ]);
       expect(text(q(w.el, '.walk-toast'))).toContain('Linked: Motion puck');
       expect(text(q(w.el, '.walk-undo'))).toBe('Undo');
@@ -1504,7 +1504,7 @@ describe('press to identify', () => {
     await w.tick();
 
     expect(linkCalls(w)).toEqual([
-      { type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: HALL }, name_device: true },
+      { type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: HALL }, name_device: true, only_if_unlinked: true },
     ]);
     expect(text(q(w.el, '.press-toast'))).toBe('Linked: Hall switch Undo');
     expect(w.selections.at(-1)).toEqual([]);
@@ -1671,7 +1671,7 @@ describe('press to identify', () => {
     latest(w).deliver({ device_id: 'dev-hall', name: 'Hall switch' });
     await w.tick();
     expect(linkCalls(w)).toEqual([
-      { type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: HALL }, name_device: true },
+      { type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: HALL }, name_device: true, only_if_unlinked: true },
     ]);
     click(q(w.el, '.press-undo'));
     await w.tick();
@@ -1733,7 +1733,7 @@ describe('press to identify', () => {
     await w.tick();
     latest(w).deliver({ stopped: true });
     await w.tick();
-    expect(text(q(w.el, '.notice.error'))).toBe('Identifying stopped because installer mode was switched off.');
+    expect(text(q(w.el, '.notice.error'))).toBe('Identifying stopped: installer mode was switched off, or another phone is listening.');
     expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
   });
 
@@ -1791,6 +1791,110 @@ describe('press to identify', () => {
     w.el.remove();
     await w.tick();
     expect(sub.unsub).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---- one identify subscription per home ----
+
+describe('a device that is already linked elsewhere', () => {
+  const ALREADY = { code: 'already_linked', message: 'That device is already linked to another element' };
+  const refuseOnce = (w: Walking) => w.callWS.mockRejectedValueOnce(ALREADY);
+
+  it('is refused on a walk step: the installer is told, nothing is linked and the step listens again', async () => {
+    const w = await mountWalk();
+    refuseOnce(w);
+    await startWalk(w);
+    await press(w, { device_id: 'dev-motion', name: 'Motion puck' });
+
+    expect(text(q(w.el, '.notice.error'))).toBe('That device is already linked to another element. Press a different one.');
+    expect(w.links).toEqual({});
+    expect(w.current.at(-1)).toBe('cur1');
+    expect(w.subs).toHaveLength(2);
+    expect(latest(w).msg).toEqual(identifyMessage({ mode: 'device', kinds: ['cover'] }));
+    expect(root(w.el as HTMLElement).querySelector('.walk-toast')).toBeNull();
+
+    // Another press works.
+    await press(w, { device_id: 'dev-hall', name: 'Hall switch' });
+    expect(w.links).toEqual({ cur1: HALL });
+  });
+
+  it('is refused for a single marker: the installer is told and it listens again', async () => {
+    const w = await mountWalk();
+    refuseOnce(w);
+    w.el.tap('sw1');
+    await w.tick();
+    latest(w).deliver({ device_id: 'dev-hall', name: 'Hall switch' });
+    await w.tick();
+
+    expect(text(q(w.el, '.notice.error'))).toBe('That device is already linked to another element. Press a different one.');
+    expect(w.links).toEqual({});
+    expect(w.selections.at(-1)).toEqual(['sw1']);
+    expect(w.subs).toHaveLength(2);
+    expect(text(q(w.el, '.press-hint'))).toContain('Press the device now');
+  });
+});
+
+describe('when the same home is listened to twice', () => {
+  it('ignores the stopped the server sends to a subscription this element already replaced (step change)', async () => {
+    const w = await mountWalk();
+    await startWalk(w);
+    const old = latest(w);
+    click(q(w.el, '.walk-skip'));
+    await w.tick();
+    // The server stops the older subscription when the new one arrives.
+    old.deliver({ stopped: true });
+    await w.tick();
+
+    expect(root(w.el as HTMLElement).querySelector('.walk')).not.toBeNull();
+    expect(root(w.el as HTMLElement).querySelector('.notice.error')).toBeNull();
+    expect(w.subs).toHaveLength(2);
+    // The walk still hears its presses.
+    await press(w, { device_id: 'dev-motion', name: 'Motion puck' });
+    expect(linkCalls(w)).toHaveLength(1);
+  });
+
+  it('ignores it after a reconnect and after Include other devices', async () => {
+    const w = await mountWalk();
+    await startWalk(w);
+    const first = latest(w);
+    w.reconnect();
+    await w.tick();
+    const second = latest(w);
+    first.deliver({ stopped: true });
+    await w.tick();
+    expect(root(w.el as HTMLElement).querySelector('.walk')).not.toBeNull();
+
+    click(q(w.el, '.include-other'));
+    await w.tick();
+    second.deliver({ stopped: true });
+    await w.tick();
+    expect(root(w.el as HTMLElement).querySelector('.walk')).not.toBeNull();
+    expect(root(w.el as HTMLElement).querySelector('.notice.error')).toBeNull();
+  });
+
+  it('ignores it when Listen is switched off and on again for a single marker', async () => {
+    const w = await mountWalk();
+    w.el.tap('sw1');
+    await w.tick();
+    const first = latest(w);
+    click(q(w.el, '.listen'));
+    await w.tick();
+    click(q(w.el, '.listen'));
+    await w.tick();
+    first.deliver({ stopped: true });
+    await w.tick();
+    expect(root(w.el as HTMLElement).querySelector('.notice.error')).toBeNull();
+    expect(q(w.el, '.listen').getAttribute('aria-checked')).toBe('true');
+    expect(text(q(w.el, '.press-hint'))).toContain('Press the device now');
+  });
+
+  it('ends the walk when the subscription in use is the one that was stopped (another phone took over)', async () => {
+    const w = await mountWalk();
+    await startWalk(w);
+    latest(w).deliver({ stopped: true });
+    await w.tick();
+    expect(root(w.el as HTMLElement).querySelector('.walk')).toBeNull();
+    expect(text(q(w.el, '.notice.error'))).toBe('The walk stopped. Open Installer to carry on.');
   });
 });
 

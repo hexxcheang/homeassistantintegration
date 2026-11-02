@@ -721,6 +721,11 @@ export function createFakeHass(
       resubscribe: options?.resubscribe !== false,
       lost: false,
     };
+    // One subscription per home: a new one stops the older (identify.py `stop_replaced`).
+    for (const older of [...identifiers]) {
+      older.send({ stopped: true });
+      stopIdentify(older);
+    }
     identifiers.add(sub);
     return async () => {
       if (sub.lost) throw new CommandError('not_found', 'Subscription not found.');
@@ -778,6 +783,19 @@ export function createFakeHass(
     const nameDevice = msg['name_device'] ?? false;
     if (typeof nameDevice !== 'boolean') {
       throw new CommandError('invalid_format', 'name_device must be true or false');
+    }
+    const onlyIfUnlinked = msg['only_if_unlinked'] ?? false;
+    if (typeof onlyIfUnlinked !== 'boolean') {
+      throw new CommandError('invalid_format', 'only_if_unlinked must be true or false');
+    }
+    if (onlyIfUnlinked) {
+      // Press-to-identify links a device only when no other element has a device link to it.
+      const held = new Set(
+        Object.entries(links).flatMap(([id, l]) => (l.type === 'device' && !(id in updates) ? [l.id] : [])),
+      );
+      if (Object.values(updates).some((l) => (l as Link | null)?.type === 'device' && held.has((l as Link).id))) {
+        throw new CommandError('already_linked', 'That device is already linked to another element');
+      }
     }
 
     // As the integration does: restore the devices no link points to any more,

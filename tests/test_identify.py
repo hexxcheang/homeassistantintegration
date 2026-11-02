@@ -428,3 +428,87 @@ async def test_unsubscribing_removes_the_listener(hass, hass_ws_client, entry, f
 
     await window(hass, freezer)
     await assert_nothing_pushed(ws)
+
+
+async def test_an_event_entity_coming_back_from_unavailable_is_not_a_press(
+    hass, hass_ws_client, entry, freezer
+):
+    add_device(hass, "Remote", [("event", "remote_action")])
+    hass.states.async_set("event.remote_action", "2026-11-02T09:00:00.000+00:00")
+    ws = await hass_ws_client()
+    await subscribe(ws, entry)
+
+    await flip(hass, "event.remote_action", "unavailable")
+    await flip(hass, "event.remote_action", "2026-11-02T09:00:00.000+00:00")
+    await window(hass, freezer)
+
+    await assert_nothing_pushed(ws)
+
+
+async def test_a_press_after_the_window_closed_is_reported_separately(
+    hass, hass_ws_client, entry, freezer
+):
+    hall = add_device(hass, "Hall", [("switch", "hall_1")])
+    study = add_device(hass, "Study", [("switch", "study_1")])
+    ws = await hass_ws_client()
+    await subscribe(ws, entry)
+
+    await flip(hass, "switch.hall_1")
+    await window(hass, freezer)
+    await flip(hass, "switch.study_1")
+    await window(hass, freezer)
+
+    assert (await ws.receive_json())["event"]["device_id"] == hall
+    assert (await ws.receive_json())["event"]["device_id"] == study
+
+
+async def test_a_press_just_inside_the_window_is_still_ambiguous(
+    hass, hass_ws_client, entry, freezer
+):
+    add_device(hass, "Hall", [("switch", "hall_1")])
+    add_device(hass, "Study", [("switch", "study_1")])
+    ws = await hass_ws_client()
+    await subscribe(ws, entry)
+
+    await flip(hass, "switch.hall_1")
+    freezer.tick(timedelta(seconds=0.9))
+    await flip(hass, "switch.study_1")
+    await window(hass, freezer, 0.1)
+
+    assert (await ws.receive_json())["event"] == {"ambiguous": True}
+
+
+async def test_unloading_the_home_ends_the_subscription(
+    hass, hass_ws_client, entry, freezer
+):
+    add_device(hass, "Hall", [("switch", "hall_1")])
+    ws = await hass_ws_client()
+    before = hass.bus.async_listeners().get("state_changed", 0)
+    await subscribe(ws, entry)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert (await ws.receive_json())["event"] == {"stopped": True}
+    assert hass.bus.async_listeners().get("state_changed", 0) == before
+
+    await flip(hass, "switch.hall_1")  # must not raise or push
+    await window(hass, freezer)
+    await assert_nothing_pushed(ws)
+
+
+async def test_switching_installer_mode_off_ends_the_subscription(
+    hass, hass_ws_client, entry, freezer
+):
+    add_device(hass, "Hall", [("switch", "hall_1")])
+    ws = await hass_ws_client()
+    before = hass.bus.async_listeners().get("state_changed", 0)
+    await subscribe(ws, entry)
+
+    hass.config_entries.async_update_entry(entry, options={"installer_mode": False})
+    await hass.async_block_till_done()
+    assert (await ws.receive_json())["event"] == {"stopped": True}
+    assert hass.bus.async_listeners().get("state_changed", 0) == before
+
+    await flip(hass, "switch.hall_1")
+    await window(hass, freezer)
+    await assert_nothing_pushed(ws)  # no second "stopped", no names

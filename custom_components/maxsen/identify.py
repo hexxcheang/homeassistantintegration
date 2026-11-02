@@ -22,11 +22,13 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import Event, HomeAssistant, State, callback, split_entity_id
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
+
+from .const import CONF_INSTALLER_MODE
 
 # Config entry domains whose devices are Zigbee.
 ZIGBEE_DOMAINS = frozenset({"mqtt", "zha"})
@@ -68,7 +70,12 @@ def _is_press(
         return False
     if domain == "event":
         # An event entity's state is the time it last fired; it starts unknown.
-        return kind == "switch" and new.state != old.state
+        # Coming back from unavailable restores the last timestamp: not a press.
+        return (
+            kind == "switch"
+            and old.state != STATE_UNAVAILABLE
+            and new.state != old.state
+        )
     if old.state in _NOT_A_STATE or old.state == new.state:
         return False
     if kind == "light_gang":
@@ -102,9 +109,19 @@ class Identifier:
         self._unsub_bus: Callable[[], None] | None = None
         self._cancel_window: Callable[[], None] | None = None
         self._candidates: dict[str, dict[str, Any]] = {}
+        self._unsubs: list[Callable[[], None]] = []
+        self._stopped = False
 
     async def async_start(self) -> None:
-        """Start listening. Only changes from now on count."""
+        """Start listening. Only changes from now on count.
+
+        It ends itself, telling the client ``{"stopped": true}``, when the home is
+        unloaded or installer mode is switched off.
+        """
+        self._unsubs = [
+            self._entry.async_on_state_change(self._check_allowed),
+            self._entry.add_update_listener(self._entry_updated),
+        ]
         self._unsub_bus = self._hass.bus.async_listen(
             EVENT_STATE_CHANGED,
             self._handle_state_changed,
@@ -113,6 +130,9 @@ class Identifier:
 
     def stop(self) -> None:
         """Stop listening and drop any candidate still waiting."""
+        self._stopped = True
+        while self._unsubs:
+            self._unsubs.pop()()
         if self._unsub_bus is not None:
             self._unsub_bus()
             self._unsub_bus = None
@@ -120,6 +140,28 @@ class Identifier:
             self._cancel_window()
             self._cancel_window = None
         self._candidates.clear()
+
+    def _allowed(self) -> bool:
+        return self._entry.state is ConfigEntryState.LOADED and bool(
+            self._entry.options.get(CONF_INSTALLER_MODE)
+        )
+
+    @callback
+    def _check_allowed(self) -> bool:
+        """End the subscription, once, if the home or installer mode is gone."""
+        if self._stopped:
+            return False
+        if self._allowed():
+            return True
+        # Stopped now, unsubscribed a moment later: this may run inside the entry's
+        # own loop over its state-change callbacks, which must not be edited.
+        self._stopped = True
+        self._on_result({"stopped": True})
+        self._hass.loop.call_soon(self.stop)
+        return False
+
+    async def _entry_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self._check_allowed()
 
     @callback
     def _handle_state_changed(self, event: Event) -> None:
@@ -129,6 +171,8 @@ class Identifier:
         if not any(_is_press(kind, domain, old, new) for kind in self._kinds):
             return
 
+        if not self._check_allowed():
+            return
         entity = er.async_get(self._hass).async_get(entity_id)
         if entity is None or not _is_primary(entity):
             return

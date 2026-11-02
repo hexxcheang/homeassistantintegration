@@ -23,6 +23,8 @@ from .const import (
     SOURCE_PLANNER,
 )
 from .entries import get_loaded_entry
+from .identify import KINDS as IDENTIFY_KINDS
+from .identify import Identifier
 from .scene import async_create_starter_scenes, async_reload_scenes
 from .package import (
     PackageError,
@@ -81,6 +83,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_refresh_preview)
     websocket_api.async_register_command(hass, ws_refresh_apply)
     websocket_api.async_register_command(hass, ws_scenes_create_starter)
+    websocket_api.async_register_command(hass, ws_identify_subscribe)
 
 
 def _loaded_entry_or_error(
@@ -390,3 +393,43 @@ async def ws_scenes_create_starter(
     async with entry.runtime_data.refresh_lock:
         scenes = await async_create_starter_scenes(hass, entry)
     connection.send_result(msg["id"], {"scenes": scenes})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "maxsen/identify/subscribe",
+        vol.Required("entry_id"): str,
+        vol.Required("mode"): vol.In(["device", "entity"]),
+        vol.Required("kinds"): [vol.In(IDENTIFY_KINDS)],
+        vol.Optional("gangs"): vol.All(int, vol.Range(min=1)),
+        vol.Optional("include_other", default=False): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_identify_subscribe(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Push what the installer presses: {device_id|entity_id, name} or {"ambiguous": true}.
+
+    Needs an admin and installer mode, checked here. Only changes after this
+    call count; unsubscribing stops the listener.
+    """
+    if (entry := _loaded_entry_or_error(hass, connection, msg)) is None:
+        return
+    if not _installer_only(connection, msg, entry, "Identifying"):
+        return
+
+    identifier = Identifier(
+        hass,
+        entry,
+        mode=msg["mode"],
+        kinds=msg["kinds"],
+        gangs=msg.get("gangs"),
+        include_other=msg["include_other"],
+        on_result=lambda result: connection.send_message(
+            websocket_api.event_message(msg["id"], result)
+        ),
+    )
+    await identifier.async_start()
+    connection.subscriptions[msg["id"]] = identifier.stop
+    connection.send_result(msg["id"])

@@ -421,14 +421,19 @@ function lagging(hass: HassLike, ms: number, travel = 0): void {
   const set = (id: string, state: string, attributes: Record<string, unknown> = {}) => {
     hass.states[id] = { state, attributes: { ...hass.states[id]?.attributes, ...attributes } };
   };
+  const travelling = new Map<string, ReturnType<typeof setTimeout>[]>();
   hass.callService = vi.fn(async (domain: string, service: string, data?: Record<string, unknown>) => {
     const id = (data as { entity_id: string }).entity_id;
     if (domain === 'cover') {
       if (service === 'stop_cover') return undefined;
       const target = service === 'set_cover_position' ? (data as { position: number }).position : service === 'open_cover' ? 100 : 0;
       const current = hass.states[id]?.attributes['current_position'] as number;
-      setTimeout(() => set(id, target > current ? 'opening' : 'closing'), ms);
-      setTimeout(() => set(id, target === 0 ? 'closed' : 'open', { current_position: target }), ms + travel);
+      // A new command turns the motor round: the trip it was on never finishes.
+      travelling.get(id)?.forEach(clearTimeout);
+      travelling.set(id, [
+        setTimeout(() => set(id, target > current ? 'opening' : 'closing'), ms),
+        setTimeout(() => set(id, target === 0 ? 'closed' : 'open', { current_position: target }), ms + travel),
+      ]);
       return undefined;
     }
     const state = service === 'turn_on' ? 'on' : 'off';
@@ -515,6 +520,96 @@ describe('CheckAll waits for the put-back to land', () => {
     await vi.advanceTimersByTimeAsync(CHECK_MS + 59_000);
     expect(finished).toBe(false);
     await vi.advanceTimersByTimeAsync(2000);
+    expect(await done).toEqual({ status: 'done', restored: true });
+  });
+
+  it('measures the 3 s cap in elapsed time, not in polls, so a throttled background tab does not wait for minutes', async () => {
+    vi.useFakeTimers();
+    const hass = world();
+    hass.callService = vi.fn(async (_d: string, service: string, data?: Record<string, unknown>) => {
+      if (service === 'turn_off') hass.states[(data as { entity_id: string }).entity_id] = { state: 'off', attributes: {} };
+    }) as never;
+    // A page in the background: no timer fires sooner than a second after it was asked for.
+    const fakeSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((fn: () => void, ms?: number) => fakeSetTimeout(fn, Math.max(ms ?? 0, 1000))) as never;
+    try {
+      const all = new CheckAll(hass, linkedHome());
+      let finished = false;
+      const done = all.run(stepFor(all.steps(), 'switch.l1_gang1')).then((r) => ((finished = true), r));
+      await vi.advanceTimersByTimeAsync(CHECK_MS + 3100);
+      expect(finished).toBe(true);
+      expect(await done).toEqual({ status: 'done', restored: true });
+    } finally {
+      globalThis.setTimeout = fakeSetTimeout;
+    }
+  });
+
+  it('gives up on a curtain after 3 s, not 60, when the put-back call was rejected', async () => {
+    vi.useFakeTimers();
+    const hass = world();
+    hass.states['cover.cur'] = { state: 'closing', attributes: { current_position: 50, supported_features: 15 } };
+    hass.callService = vi.fn(async (_d: string, service: string) => {
+      if (service === 'set_cover_position') throw new Error('Home Assistant refused.');
+    }) as never;
+    const all = new CheckAll(hass, linkedHome());
+    let finished = false;
+    const done = all.run(stepFor(all.steps(), 'cover.cur')).then((r) => ((finished = true), r));
+    await vi.advanceTimersByTimeAsync(CHECK_MS + 2800);
+    expect(finished).toBe(false);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(await done).toEqual({ status: 'done', restored: false });
+  });
+
+  it('counts a curtain as settled when it is not moving and has not changed position for 1.5 s, even if it is off target', async () => {
+    vi.useFakeTimers();
+    const hass = world();
+    // Home Assistant says it is back, but 8 % short of where it was, and it stays there.
+    hass.callService = vi.fn(async (_d: string, service: string, data?: Record<string, unknown>) => {
+      const id = (data as { entity_id: string }).entity_id;
+      if (service === 'close_cover') hass.states[id] = { state: 'closed', attributes: { current_position: 0, supported_features: 15 } };
+      if (service === 'set_cover_position') hass.states[id] = { state: 'open', attributes: { current_position: 92, supported_features: 15 } };
+    }) as never;
+    const all = new CheckAll(hass, linkedHome());
+    let finished = false;
+    const done = all.run(stepFor(all.steps(), 'cover.cur')).then((r) => ((finished = true), r));
+    await vi.advanceTimersByTimeAsync(CHECK_MS + 1200);
+    expect(finished).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await done).toEqual({ status: 'done', restored: true });
+  });
+
+  it('keeps waiting for a curtain whose position is still changing, however slowly', async () => {
+    vi.useFakeTimers();
+    const hass = world();
+    let position = 30;
+    hass.callService = vi.fn(async (_d: string, service: string) => {
+      if (service === 'close_cover') {
+        hass.states['cover.cur'] = { state: 'open', attributes: { current_position: position, supported_features: 15 } };
+      }
+    }) as never;
+    const all = new CheckAll(hass, linkedHome());
+    const crawl = setInterval(() => {
+      position += 1;
+      hass.states['cover.cur'] = { state: 'open', attributes: { current_position: position, supported_features: 15 } };
+    }, 1000);
+    let finished = false;
+    const done = all.run(stepFor(all.steps(), 'cover.cur')).then((r) => ((finished = true), r));
+    await vi.advanceTimersByTimeAsync(CHECK_MS + 20_000);
+    expect(finished).toBe(false);
+    clearInterval(crawl);
+    await vi.advanceTimersByTimeAsync(1700);
+    expect(await done).toEqual({ status: 'done', restored: true });
+  });
+
+  it('ends a step that has already run fully as done when it is aborted only while the put-back settles', async () => {
+    vi.useFakeTimers();
+    const hass = world();
+    lagging(hass, 400);
+    const all = new CheckAll(hass, linkedHome());
+    const done = all.run(stepFor(all.steps(), 'switch.l1_gang1'));
+    await vi.advanceTimersByTimeAsync(CHECK_MS + 100); // the put-back has been asked for, and has not landed
+    void all.abort();
+    await vi.advanceTimersByTimeAsync(400);
     expect(await done).toEqual({ status: 'done', restored: true });
   });
 

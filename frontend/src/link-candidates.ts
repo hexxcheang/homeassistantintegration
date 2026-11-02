@@ -70,12 +70,17 @@ function entityCandidates(domains: string[], hass: HassLike): Candidate[] {
   return out;
 }
 
-function deviceCandidates(domains: string[] | undefined, hass: HassLike): Candidate[] {
+function deviceCandidates(
+  domains: string[] | undefined,
+  hass: HassLike,
+  exclude: ReadonlySet<string>,
+): Candidate[] {
   return Object.values(hass.devices)
     .filter(
       (d) =>
-        domains === undefined ||
-        deviceEntities(hass, d.id).some((e) => domains.includes(domainOf(e.entity_id))),
+        !exclude.has(d.id) &&
+        (domains === undefined ||
+          deviceEntities(hass, d.id).some((e) => domains.includes(domainOf(e.entity_id)))),
     )
     .map((d) => ({
       link: { type: 'device' as const, id: d.id },
@@ -86,12 +91,17 @@ function deviceCandidates(domains: string[] | undefined, hass: HassLike): Candid
 
 /**
  * What an installer may link an element to, sorted by area name then name. Entries with no area
- * come last.
+ * come last. `excludeDevices` leaves out devices by id (the walk's pick step offers only devices
+ * nothing is linked to); entities are not affected.
  */
-export function linkCandidates(el: HomeElement, hass: HassLike): Candidate[] {
+export function linkCandidates(
+  el: HomeElement,
+  hass: HassLike,
+  options: { excludeDevices?: ReadonlySet<string> } = {},
+): Candidate[] {
   const found = LIGHTING_CATEGORIES.has(el.categoryId)
     ? entityCandidates(entityDomains(el.categoryId), hass)
-    : deviceCandidates(deviceDomains(el.categoryId), hass);
+    : deviceCandidates(deviceDomains(el.categoryId), hass, options.excludeDevices ?? new Set());
   return found.sort(
     (a, b) =>
       Number(a.area === '') - Number(b.area === '') ||

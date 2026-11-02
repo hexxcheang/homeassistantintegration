@@ -47,6 +47,16 @@ const hass = makeHass({
 const ids = (cs: ReturnType<typeof linkCandidates>) => cs.map((c) => c.link.id);
 
 describe('linkCandidates', () => {
+  it('can leave out devices that something is already linked to, and only devices', () => {
+    const camera = element({ categoryId: 'cameras' });
+    expect(ids(linkCandidates(camera, hass))).toEqual(['d_cam']);
+    expect(ids(linkCandidates(camera, hass, { excludeDevices: new Set(['d_cam']) }))).toEqual([]);
+    expect(ids(linkCandidates(camera, hass, { excludeDevices: new Set(['d_hub']) }))).toEqual(['d_cam']);
+    // An entity a light could link to is never left out by a device id.
+    const downlight = element({ categoryId: 'downlights' });
+    expect(ids(linkCandidates(downlight, hass, { excludeDevices: new Set(['d_switch']) }))).toContain('light.hall');
+  });
+
   it('offers a downlight only light and switch entities', () => {
     const cs = linkCandidates(element({ categoryId: 'downlights' }), hass);
     expect(ids(cs).sort()).toEqual(['light.dl_bed', 'light.dl_living', 'light.hall', 'light.yaml_only', 'switch.entry_1', 'switch.pump']);

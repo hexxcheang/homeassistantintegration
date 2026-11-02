@@ -1324,6 +1324,31 @@ describe('linking walk', () => {
       expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
     });
 
+    it('lists only devices that have no device link to any element; the manual list still shows them all', async () => {
+      const w = await mountWalk({
+        extra: withAircon,
+        hass: (h) => {
+          aircon(h);
+          h.devices['dev-ac2'] = { id: 'dev-ac2', name: 'Bedroom aircon', area_id: 'hall' };
+          h.entities['climate.bedroom'] = { entity_id: 'climate.bedroom', device_id: 'dev-ac2' };
+          h.states['climate.bedroom'] = { state: 'cool', attributes: {} };
+        },
+        links: { sw1: { type: 'device', id: 'dev-ac' } },
+      });
+      // Outside the walk, a person may link any device (to move or share one).
+      w.el.tap('ac1');
+      await w.tick();
+      expect(candidateIds(w.el).sort()).toEqual(['dev-ac', 'dev-ac2']);
+      w.el.tap('ac1'); // selects nothing again
+      await w.tick();
+
+      await startWalk(w);
+      w.el.tap('ac1');
+      await w.tick();
+      expect(prompt(w)).toBe('Pick it from the list');
+      expect(candidateIds(w.el)).toEqual(['dev-ac2']);
+    });
+
     const pickAc = async (w: Walking) => {
       await startWalk(w);
       w.el.tap('ac1');
@@ -1675,7 +1700,13 @@ describe('press to identify', () => {
     ]);
     click(q(w.el, '.press-undo'));
     await w.tick();
-    expect(linkCalls(w).at(-1)).toEqual({ type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: MOTION } });
+    // The old device is a device link again, so it is named again (a person's own name is left alone by the server).
+    expect(linkCalls(w).at(-1)).toEqual({
+      type: 'maxsen/links/set',
+      entry_id: 'e1',
+      updates: { sw1: MOTION },
+      name_device: true,
+    });
     expect(w.links).toEqual({ sw1: MOTION });
   });
 
@@ -1895,6 +1926,27 @@ describe('when the same home is listened to twice', () => {
     await w.tick();
     expect(root(w.el as HTMLElement).querySelector('.walk')).toBeNull();
     expect(text(q(w.el, '.notice.error'))).toBe('The walk stopped. Open Installer to carry on.');
+  });
+});
+
+describe('Undo of a relink', () => {
+  it('names the old device again, for a single marker and for lights that had a device link', async () => {
+    const w = await mountWalk({ links: { dl3: MOTION } });
+    await startWalk(w);
+    w.el.tap('dl1');
+    await w.tick();
+    await press(w, { entity_id: 'switch.l1_gang2', name: 'Level 1 gang 2' });
+    w.el.tap('dl3');
+    click(q(w.el, '.walk-done'));
+    await w.tick();
+    click(q(w.el, '.walk-undo'));
+    await w.tick();
+    expect(linkCalls(w).at(-1)).toEqual({
+      type: 'maxsen/links/set',
+      entry_id: 'e1',
+      updates: { dl1: null, dl3: MOTION },
+      name_device: true,
+    });
   });
 });
 
@@ -2473,6 +2525,23 @@ describe('Check all: what it switches must not be heard as a press', () => {
     expect(checkPrompt(w)).toBe('Watch now. It switches for 2 seconds, then goes back.');
     expect(serviceNames(w)).toHaveLength(4);
     Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+
+  it('does not say it was put back when the screen turned off if the step had already run and was only settling', async () => {
+    const w = await mountCheck();
+    lag(w);
+    await startCheck(w);
+    await afterTwoSeconds(w);
+    await answer(w, 'ok'); // the curtain; the first gang is switched off now
+    await w.tick(2100); // its put-back has been asked for and has not landed
+    expect(serviceNames(w).at(-1)).toBe('switch.turn_on');
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await w.tick(500);
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    expect(w.hass.states['switch.l1_gang1']!.state).toBe('on');
+    expect(checkPrompt(w)).toBe('Was it the right one?');
+    expect(root(w.el as HTMLElement).querySelector('.check')!.textContent).not.toContain('screen turned off');
   });
 
   it('ignores the screen turning off between steps, and stops listening for it when Check all is over', async () => {

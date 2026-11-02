@@ -702,7 +702,9 @@ export class MaxsenLinkMode extends LitElement {
     clearTimeout(this._toastTimer);
     this._busy = true;
     try {
-      await setLinks(hass, entryId, done.previous);
+      // A device link given back is named again (the server leaves a name a person gave alone).
+      const device = Object.values(done.previous).some((link) => link?.type === 'device');
+      await setLinks(hass, entryId, done.previous, { nameDevice: device });
     } catch (err) {
       this._say(errorMessage(err, 'Could not undo the link. Try again.'), true);
       // Still linked: carry on as if it had been left.
@@ -1132,7 +1134,14 @@ export class MaxsenLinkMode extends LitElement {
     const hass = this.hass;
     if (!first || !hass) return nothing;
     const words = this._search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const found = linkCandidates(first, hass).filter((c) => {
+    // The walk's pick step offers only devices nothing is linked to; the manual list offers all.
+    const picking = this._walk?.current?.kind === 'pick' && this._walk.current.elementId === first.id;
+    const excludeDevices = picking
+      ? new Set(
+          Object.values(this._walkHome()?.links ?? {}).flatMap((link) => (link.type === 'device' ? [link.id] : [])),
+        )
+      : undefined;
+    const found = linkCandidates(first, hass, { excludeDevices }).filter((c) => {
       const hay = `${c.name} ${c.area} ${c.detail ?? ''}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });

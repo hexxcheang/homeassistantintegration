@@ -6,10 +6,17 @@ import { orderedElements } from './walk.ts';
 /** How long a load stays switched before it goes back. */
 export const CHECK_MS = 2000;
 
-/** How often a put-back is looked at while waiting for it to land, and how long a switch or a curtain may take. */
+/**
+ * How often a put-back is looked at while waiting for it to land, and how long (in elapsed time, not
+ * polls: a page in the background polls slowly) a switch or a curtain may take. A put-back that Home
+ * Assistant refused is not waited for as long as one that was accepted.
+ */
 const SETTLE_POLL_MS = 100;
 const SETTLE_SWITCH_MS = 3000;
 const SETTLE_COVER_MS = 60_000;
+const SETTLE_REFUSED_MS = 3000;
+/** A curtain that is not travelling and has not changed position for this long has stopped, wherever it is. */
+const COVER_STILL_MS = 1500;
 /** A curtain counts as back at its position within this many percent. */
 const POSITION_TOLERANCE = 2;
 
@@ -218,13 +225,15 @@ export class CheckAll {
     }
     if (failure === undefined) await this.wait(active);
     // Always put back: a call that failed may still have moved the load.
+    const cutShort = active.cancelled; // aborted before the put-back: the step did not run in full
     const putBack = await Promise.allSettled(memos.map((m) => this.putBack(m)));
     const restored = putBack.every((r) => r.status === 'fulfilled');
     // The put-back has been asked for; Zigbee reports it a moment later, and a curtain keeps
     // travelling. Until it has, a listener would take those reports for presses.
-    await Promise.all(memos.map((m) => this.settled(m, active)));
+    await Promise.all(memos.map((m, i) => this.settled(m, active, putBack[i]!.status === 'rejected')));
     if (failure !== undefined) return { status: 'failed', message: failure, restored };
-    return active.cancelled ? { status: 'cancelled', restored } : { status: 'done', restored };
+    // An abort that only came while the put-back was settling does not make a step that ran in full "cancelled".
+    return cutShort ? { status: 'cancelled', restored } : { status: 'done', restored };
   }
 
   private wait(active: Active): Promise<void> {
@@ -235,10 +244,30 @@ export class CheckAll {
     });
   }
 
-  /** Waits until `m` is back where it was (or the cap runs out, quietly). */
-  private async settled(m: Memo, active: Active): Promise<void> {
-    const cap = m.domain === 'cover' ? SETTLE_COVER_MS : SETTLE_SWITCH_MS;
-    for (let waited = 0; waited < cap && !active.skipSettle && !this.isBack(m); waited += SETTLE_POLL_MS) {
+  /**
+   * Waits until `m` is back where it was, or the cap runs out (quietly). A curtain also counts as
+   * settled once it is not opening or closing and its position has not changed for a while: some
+   * stop short of where they were, and waiting a minute for that would keep Check all stuck.
+   */
+  private async settled(m: Memo, active: Active, refused: boolean): Promise<void> {
+    const cap = refused ? SETTLE_REFUSED_MS : m.domain === 'cover' ? SETTLE_COVER_MS : SETTLE_SWITCH_MS;
+    const started = Date.now();
+    let lastPosition: unknown;
+    let still = started;
+    while (!active.skipSettle && !this.isBack(m)) {
+      const now = Date.now();
+      if (now - started >= cap) return;
+      if (m.domain === 'cover') {
+        const cover = this.hass.states[m.id];
+        const position = cover?.attributes['current_position'];
+        const travelling = cover?.state === 'opening' || cover?.state === 'closing';
+        if (travelling || position !== lastPosition) {
+          lastPosition = position;
+          still = now;
+        } else if (now - still >= COVER_STILL_MS) {
+          return;
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS));
     }
   }

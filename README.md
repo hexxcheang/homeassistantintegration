@@ -132,8 +132,8 @@ checklist*, step 1).
 - If a press is ignored, wait a few seconds and press again. A press made within about 5 seconds of
   the app switching that same device (for example right after **Check all**) can be ignored by Home
   Assistant.
-- Outside the walk you can do one element at a time: tap it, switch on **Listen**, then press the
-  device.
+- Outside the walk you can do one element at a time: tap it and press the device. For an element
+  that is already linked, tap **Press to relink** first.
 - Only one phone can run the walk at a time. When a second phone starts listening, the first one
   stops with "The walk stopped. Open Installer to carry on."
 - Only Zigbee devices (Zigbee2MQTT or ZHA) are noticed. Switch on **Include other devices** only
@@ -143,8 +143,9 @@ checklist*, step 1).
 
 A linked device is named "‹Level› – ‹label›", for example "Level 1 – Entrance switch", and put in
 the area of that level (made if it is not there). Lights are linked to a gang, so they are never
-renamed. A device that a person has already named, or put in an area, keeps its name and area.
-**Undo**, and **Wrong** in Check all, put the old name and area back.
+renamed. A device that a person has already named keeps its name and its area. A device that only
+has an area set by a person is still renamed, and keeps that area. **Undo**, and **Wrong** in Check
+all, put the old name and area back.
 
 ### Check all
 

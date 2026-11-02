@@ -60,9 +60,10 @@ Do this on site, signed in to Home Assistant as an administrator.
    **Submit**. Without it the installer tools stay hidden and the server refuses them, even for
    administrators.
 2. Open **Home** in the sidebar. Tap **Installer**.
-3. **Link devices.** Tap an element on the drawing, then tap the device (or, for lights, the light
-   or switch) it belongs to in the list. Use **Search by name or room** to find it. The element
-   stops being dashed. **Unlink** takes a link away.
+3. **Link devices.** Follow *Pairing and linking a home* (below). To link one element by hand: tap
+   it on the drawing, then tap the device (or, for lights, the light or switch) it belongs to in the
+   list. Use **Search by name or room** to find it. The element stops being dashed. **Unlink** takes
+   a link away.
    - **Select several** links a group in one go: for example tap all the downlights on one wall
      switch, then tap that switch. Pick lights together, or other devices together, not both.
    - Elements that are not shown on the drawing are under **Not on the drawing**. Tap one there
@@ -90,6 +91,66 @@ Home Assistant show "Missing device": link them again.
 A linked device shows and switches only its main entities. Its settings, such as a wall switch's
 backlight or child lock, and entities hidden in Home Assistant are left out of the drawing, the
 tap and hold actions and the starter scenes.
+
+## Pairing and linking a home
+
+The order that works best on site. Sign in as an administrator with Installer mode on (*Installer
+checklist*, step 1).
+
+1. **Prepare.** Put the Home Assistant box and the Zigbee radio in a central spot, with the radio on
+   a USB extension lead. Add **Maxsen Home** with the planner's pairing code (*Add the integration*).
+2. **Pair everything in one batch, in mesh order.** Mains-powered devices first, nearest the radio
+   and then outward. Battery sensors last. Do not name anything: the app names devices for you.
+3. **Check the count.** The number of devices in Home Assistant should match the planner's list for
+   this home. Pair what is missing before you go on.
+4. **Turn every gang off** by hand. The app never switches your loads during the walk, and it can
+   only tell a light press by a gang going from off to on.
+5. **Link the devices.** Open **Home**, tap **Installer**, then **Start linking walk**. The bar shows
+   what to do for each element, level by level. Do it and the app links it and moves on. For lights,
+   press the gang that turns them on, then tap the other lights that came on, then tap **Link these
+   lights**.
+6. **Check all.** Tap **Check all** and watch the home (see *Check all* below). Tap **OK** or
+   **Wrong** for each one.
+7. **Finish.** Tap **Create starter scenes**, add a non-admin user for each wall panel, then switch
+   Installer mode off (*Installer checklist*, steps 4, 6 and 7).
+
+### What the walk asks
+
+| Kind of device | What you do |
+| --- | --- |
+| Switch or control panel | "Press any button on the switch at ‹name›" |
+| Lights | "Press the gang that turns this on", then "Tap the other lights that came on" |
+| Curtain | "Press open or close on the curtain switch" |
+| Sensor | "Wave at the sensor, or open the door it's on" |
+| Aircon, camera, lock, other | "Pick it from the list": tap the device in the list below (use **Search by name or room**) |
+
+- **Skip** moves the element to the end of the walk. **Back** goes to the step before. **Undo**
+  (beside "Linked: …" for 2 seconds) takes the last link away and asks again. Tap any element on the
+  drawing to jump straight to it.
+- "Two devices reacted. Press once more." means two devices changed at the same moment, so nothing
+  was linked. Press the same device again.
+- If a press is ignored, wait a few seconds and press again. A press made within about 5 seconds of
+  the app switching that same device (for example right after **Check all**) can be ignored by Home
+  Assistant.
+- Outside the walk you can do one element at a time: tap it, switch on **Listen**, then press the
+  device.
+- Only Zigbee devices (Zigbee2MQTT or ZHA) are noticed. Switch on **Include other devices** only
+  for an install that does not use Zigbee.
+
+### Names and rooms
+
+A linked device is named "‹Level› – ‹label›", for example "Level 1 – Entrance switch", and put in
+the area of that level (made if it is not there). Lights are linked to a gang, so they are never
+renamed. A device that a person has already named, or put in an area, keeps its name and area.
+**Undo**, and **Wrong** in Check all, put the old name and area back.
+
+### Check all
+
+Each switch gang, light circuit and curtain is switched for 2 seconds and then goes back, one at a
+time. Watch the home and the highlighted elements. **OK** goes to the next. **Wrong** unlinks it,
+puts the old name back and puts it back in the walk. **Again** runs it once more. When it is done
+the summary reads, for example, "5 OK, 1 to relink". **Relink now** starts the walk at the elements
+marked Wrong. Aircon, locks, cameras and sensors are not checked.
 
 ## Android wall panels
 

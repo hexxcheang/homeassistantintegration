@@ -25,7 +25,7 @@ from .const import (
 from .entries import get_loaded_entry
 from .identify import KINDS as IDENTIFY_KINDS
 from .identify import Identifier
-from .naming import apply_changes, plan_for_links
+from .naming import NamingPlan, apply_changes, plan_for_links
 from .scene import async_create_starter_scenes, async_reload_scenes
 from .package import (
     PackageError,
@@ -161,19 +161,20 @@ async def ws_links_set(
         return
 
     store = entry.runtime_data
-    package = store.data["package"]
-    known = element_index(package) if package else {}
-    if any(element_id not in known for element_id in msg["updates"]):
-        connection.send_error(
-            msg["id"], "invalid_element", "An element is not in this home"
-        )
-        return
-
     updates = msg["updates"]
     # Naming is planned, saved with the links, then written to the registry (which
     # is Home Assistant's, not part of the store's transaction); a registry error
     # puts the links and records back.
     async with store.link_lock:
+        # Checked here, not before waiting for the lock: a refresh applied
+        # meanwhile may have removed the element.
+        package = store.data["package"]
+        known = element_index(package) if package else {}
+        if any(element_id not in known for element_id in updates):
+            connection.send_error(
+                msg["id"], "invalid_element", "An element is not in this home"
+            )
+            return
         try:
             plan = plan_for_links(
                 hass, store.data, updates, known, name_device=msg["name_device"]
@@ -389,7 +390,30 @@ async def ws_refresh_apply(
         removed_ids = {element["id"] for element in summary["removed"]}
         try:
             slim = await save_images(hass, entry.entry_id, package)
-            scenes_changed = await store.async_apply_refresh(slim, removed_ids)
+            # Held with the links so a links/set sees either the old home or the
+            # new one, and the devices of pruned links are restored with them.
+            async with store.link_lock:
+                links = store.data["links"]
+                try:
+                    plan = plan_for_links(
+                        hass,
+                        store.data,
+                        {eid: None for eid in removed_ids if eid in links},
+                        {},
+                        name_device=False,
+                    )
+                except Exception:  # noqa: BLE001 - the registry is Home Assistant's
+                    _LOGGER.warning("Could not plan restoring devices", exc_info=True)
+                    plan = NamingPlan()
+                scenes_changed = await store.async_apply_refresh(
+                    slim, removed_ids, named=plan.named
+                )
+                try:
+                    apply_changes(hass, plan.changes)
+                except Exception:  # noqa: BLE001 - the home is already saved; keep it
+                    _LOGGER.warning(
+                        "Could not restore devices of removed elements", exc_info=True
+                    )
         except (PackageError, OSError):
             # Writing the images can fail here. A failed store write does not
             # raise: Home Assistant's Store only logs it.

@@ -17,6 +17,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.maxsen.const import DOMAIN
 from custom_components.maxsen.package import PackageError
 from custom_components.maxsen.store import MaxsenStore
+from homeassistant.helpers import device_registry as dr
 
 BASE = "https://planner.example.com"
 HOME_URL = f"{BASE}/api/public/home-assistant/home"
@@ -569,6 +570,129 @@ async def test_edits_made_while_an_apply_is_saving_are_not_lost(
         assert data["links"]["sw1"] == new_link
         assert "dl2" not in data["links"]  # still pruned by the apply
         assert data["quick_panel"] == [{"type": "element", "id": "sw1"}, new_item]
+
+
+async def named_device(hass, ws, entry, element_ids, name="Hall"):
+    """A real device linked to (and named for) each of the elements."""
+    config_entry = MockConfigEntry(domain="mqtt", title=name)
+    config_entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=config_entry.entry_id, identifiers={("mqtt", name)}, name=name
+    )
+    resp = await call(
+        ws,
+        "maxsen/links/set",
+        entry_id=entry.entry_id,
+        updates={e: {"type": "device", "id": device.id} for e in element_ids},
+        name_device=True,
+    )
+    assert resp["success"], resp
+    return device.id
+
+
+async def test_a_refresh_that_removes_a_named_marker_restores_the_device(
+    hass, hass_ws_client, aioclient_mock, entry, home_package
+):
+    ws = await hass_ws_client()
+    device_id = await named_device(hass, ws, entry, ["sen2"])
+    assert dr.async_get(hass).async_get(device_id).name_by_user == "Level 2 – Motion Sensor"
+    aioclient_mock.get(HOME_URL, json=changed_package(home_package))
+    previewed = (await preview(ws, entry))["result"]
+
+    resp = await apply(ws, entry, previewed["preview_id"])
+
+    assert resp["success"], resp
+    device = dr.async_get(hass).async_get(device_id)
+    assert (device.name_by_user, device.area_id) == (None, None)
+    assert entry.runtime_data.data["named"] == {}
+    assert "sen2" not in entry.runtime_data.data["links"]
+    reloaded = MaxsenStore(hass, entry.entry_id)
+    await reloaded.async_load()
+    assert reloaded.data["named"] == {}
+
+
+async def test_a_refresh_keeps_a_device_another_marker_still_links_to_named(
+    hass, hass_ws_client, aioclient_mock, entry, home_package
+):
+    ws = await hass_ws_client()
+    device_id = await named_device(hass, ws, entry, ["sw1", "sen2"])
+    name = dr.async_get(hass).async_get(device_id).name_by_user
+    aioclient_mock.get(HOME_URL, json=changed_package(home_package))
+    previewed = (await preview(ws, entry))["result"]
+
+    resp = await apply(ws, entry, previewed["preview_id"])
+
+    assert resp["success"], resp
+    assert dr.async_get(hass).async_get(device_id).name_by_user == name
+    assert list(entry.runtime_data.data["named"]) == [device_id]
+
+
+async def test_a_registry_error_during_a_refresh_does_not_fail_the_refresh(
+    hass, hass_ws_client, aioclient_mock, entry, home_package
+):
+    ws = await hass_ws_client()
+    device_id = await named_device(hass, ws, entry, ["sen2"])
+    aioclient_mock.get(HOME_URL, json=changed_package(home_package))
+    previewed = (await preview(ws, entry))["result"]
+
+    with patch.object(
+        dr.DeviceRegistry, "async_update_device", side_effect=ValueError("boom")
+    ):
+        resp = await apply(ws, entry, previewed["preview_id"])
+
+    assert resp["success"], resp
+    data = entry.runtime_data.data
+    assert [level["id"] for level in data["package"]["levels"]] == ["level-1"]
+    assert "sen2" not in data["links"]
+    assert device_id not in data["named"]
+
+
+async def test_a_link_request_that_waits_for_a_refresh_sees_the_new_home(
+    hass, hass_ws_client, aioclient_mock, entry, home_package
+):
+    aioclient_mock.get(HOME_URL, json=changed_package(home_package))
+    ws = await hass_ws_client()
+    previewed = (await preview(ws, entry))["result"]
+
+    from homeassistant.helpers.storage import Store
+
+    real_save = Store.async_save
+    reached, release = asyncio.Event(), asyncio.Event()
+    first = True
+
+    async def stalled_first_save(self, data):
+        nonlocal first
+        if first:  # the apply's own save
+            first = False
+            reached.set()
+            await release.wait()
+        return await real_save(self, data)
+
+    with patch.object(Store, "async_save", stalled_first_save):
+        await ws.send_json_auto_id(
+            {
+                "type": "maxsen/refresh/apply",
+                "entry_id": entry.entry_id,
+                "preview_id": previewed["preview_id"],
+            }
+        )
+        await asyncio.wait_for(reached.wait(), 5)
+        # sen2 is still in the saved home, but the apply is about to remove it.
+        await ws.send_json_auto_id(
+            {
+                "type": "maxsen/links/set",
+                "entry_id": entry.entry_id,
+                "updates": {"sen2": {"type": "entity", "id": "binary_sensor.motion"}},
+            }
+        )
+        await asyncio.sleep(0.1)
+        release.set()
+        results = {r["id"]: r for r in [await ws.receive_json(), await ws.receive_json()]}
+
+    ordered = [results[i] for i in sorted(results)]
+    assert ordered[0]["success"], ordered
+    assert ordered[1]["error"]["code"] == "invalid_element"
+    assert "sen2" not in entry.runtime_data.data["links"]
 
 
 # ------------------------------------------------------- the preview lifetime

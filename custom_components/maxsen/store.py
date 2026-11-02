@@ -203,13 +203,18 @@ class MaxsenStore:
         return pkg
 
     async def async_apply_refresh(
-        self, slim: dict[str, Any], removed_ids: set[str]
+        self,
+        slim: dict[str, Any],
+        removed_ids: set[str],
+        named: dict[str, dict[str, Any] | None] | None = None,
     ) -> bool:
         """Save a refreshed package and tidy what depended on the old one.
 
         Links and quick-panel items of removed elements go. When starter scenes
         exist they are rebuilt from the new package and the pruned links, and
-        quick-panel items for scenes that no longer exist go too. Returns whether
+        quick-panel items for scenes that no longer exist go too. ``named`` changes
+        the records of devices Maxsen named in the same save (``None`` drops a
+        record). Returns whether
         the starter scenes changed (the scene entities then need reloading).
         """
         panel_changed = False
@@ -224,6 +229,14 @@ class MaxsenStore:
             }
             gone_entities: set[str] = set()
             changes: dict[str, Any] = {"package": slim, "links": links}
+            if named:
+                records = dict(data["named"])
+                for device_id, record in named.items():
+                    if record is None:
+                        records.pop(device_id, None)
+                    else:
+                        records[device_id] = record
+                changes["named"] = records
             if data["scenes"]:
                 scenes = build_starter_scenes(slim, links, self._hass)
                 kept = {scene["id"] for scene in scenes}

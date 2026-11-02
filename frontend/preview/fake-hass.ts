@@ -574,18 +574,7 @@ export function createFakeHass(
       if (old?.type === 'device' && !stillLinked.has(old.id)) released.add(old.id);
     }
     const nextNamed = { ...named };
-    for (const deviceId of released) {
-      const record = nextNamed[deviceId];
-      if (!record) continue;
-      delete nextNamed[deviceId];
-      const device = world.devices[deviceId];
-      if (!device) continue;
-      world.devices[deviceId] = {
-        ...device,
-        ...(device.name_by_user === record.name ? { name_by_user: record.prev_name } : {}),
-        ...((device.area_id ?? null) === record.area_id ? { area_id: record.prev_area_id } : {}),
-      };
-    }
+    restoreDevices(world, nextNamed, released);
     if (nameDevice) {
       const taken = new Set(
         Object.values(world.devices).flatMap((d) => (d.name_by_user ? [d.name_by_user] : [])),
@@ -616,6 +605,22 @@ export function createFakeHass(
     commit(world);
     emit('links');
     return { links: structuredClone(links) };
+  }
+
+  /** Put back the name and area Maxsen replaced on these devices, unless a person changed them since. */
+  function restoreDevices(world: World, records: Record<string, NamedRecord>, deviceIds: Iterable<string>): void {
+    for (const deviceId of deviceIds) {
+      const record = records[deviceId];
+      if (!record) continue;
+      delete records[deviceId];
+      const device = world.devices[deviceId];
+      if (!device) continue;
+      world.devices[deviceId] = {
+        ...device,
+        ...(device.name_by_user === record.name ? { name_by_user: record.prev_name } : {}),
+        ...((device.area_id ?? null) === record.area_id ? { area_id: record.prev_area_id } : {}),
+      };
+    }
   }
 
   function setQuickPanel(msg: Message): unknown {
@@ -726,7 +731,15 @@ export function createFakeHass(
     provision(world, preview.pkg, (id) => !before.has(id));
     pkg = preview.pkg;
     stored = strip(pkg);
-    links = Object.fromEntries(Object.entries(links).filter(([id]) => !removed.has(id)));
+    const pruned = Object.fromEntries(Object.entries(links).filter(([id]) => !removed.has(id)));
+    // Devices only a removed marker linked to go back to their own name and area.
+    const stillLinked = new Set(Object.values(pruned).flatMap((l) => (l.type === 'device' ? [l.id] : [])));
+    const dropped = Object.entries(links).flatMap(([id, l]) =>
+      removed.has(id) && l.type === 'device' && !stillLinked.has(l.id) ? [l.id] : [],
+    );
+    links = pruned;
+    named = { ...named };
+    restoreDevices(world, named, dropped);
     quickPanel = quickPanel.filter((i) => !(i.type === 'element' && removed.has(i.id)));
     if (scenes.length > 0) {
       const old = [...sceneEntities.keys()];

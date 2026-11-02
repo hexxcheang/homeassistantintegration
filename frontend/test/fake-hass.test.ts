@@ -660,6 +660,26 @@ describe('createFakeHass: refresh', () => {
     expect(planElements.some((e) => e.id === 'dl9')).toBe(true);
   });
 
+  it('a refresh that removes a named marker puts its device back', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    const { id: deviceId } = (await getHome(fake)).links['sw1']!;
+    const before = { ...fake.devices[deviceId]! };
+    await ws(fake, { type: 'maxsen/links/set', updates: { sw1: null } });
+    await ws(fake, {
+      type: 'maxsen/links/set',
+      updates: { sw1: { type: 'device', id: deviceId } },
+      name_device: true,
+    });
+    expect(fake.devices[deviceId]!.name_by_user).toBe('Level 1 – Entrance switch');
+
+    fake.setPlannerPackage(changedPackage()); // sw1 is gone
+    const preview = await ws<RefreshSummary>(fake, { type: 'maxsen/refresh/preview' });
+    await ws(fake, { type: 'maxsen/refresh/apply', preview_id: preview.preview_id });
+
+    expect(fake.devices[deviceId]!.name_by_user ?? null).toBeNull();
+    expect(fake.devices[deviceId]!.area_id).toBe(before.area_id);
+  });
+
   it('rejects apply for an unknown, used or expired preview', async () => {
     vi.useFakeTimers();
     const fake = createFakeHass(fresh(), admin);

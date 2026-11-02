@@ -3201,7 +3201,7 @@ var Qn = class extends V {
 		}).then((e) => {
 			i === this._listenToken ? this._stopListen = e : h(e);
 		}, (e) => {
-			i === this._listenToken && this._say(m(e, "Could not listen for a press. Try again."), !0);
+			i === this._listenToken && (this._say(m(e, "Could not listen for a press. Try again."), !0), this._walk || (this._armed = !1, this._singleKey = ""));
 		});
 	}
 	_stopListening() {
@@ -3248,7 +3248,7 @@ var Qn = class extends V {
 	}
 	async _onSinglePress(e, t) {
 		if ("stopped" in t) {
-			this._stopListening(), this._armed = !1, this._say(Kn, !0);
+			this._stopListening(), this._armed = !1, this._singleKey = "", this._say(Kn, !0);
 			return;
 		}
 		if ("ambiguous" in t) {

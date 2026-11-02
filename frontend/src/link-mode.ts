@@ -356,8 +356,12 @@ export class MaxsenLinkMode extends LitElement {
         else release(stop);
       },
       (err: unknown) => {
-        if (token === this._listenToken) {
-          this._say(errorMessage(err, 'Could not listen for a press. Try again.'), true);
+        if (token !== this._listenToken) return;
+        this._say(errorMessage(err, 'Could not listen for a press. Try again.'), true);
+        if (!this._walk) {
+          // Not listening: say so, and let Listen / Press to relink subscribe again.
+          this._armed = false;
+          this._singleKey = '';
         }
       },
     );
@@ -440,6 +444,7 @@ export class MaxsenLinkMode extends LitElement {
     if ('stopped' in result) {
       this._stopListening();
       this._armed = false;
+      this._singleKey = ''; // so turning Listen on again subscribes afresh
       this._say(IDENTIFY_STOPPED, true);
       return;
     }

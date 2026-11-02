@@ -1736,6 +1736,52 @@ describe('press to identify', () => {
     expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
   });
 
+  it('listens again when Listen is turned on after the server ended the prompt', async () => {
+    const w = await mountWalk();
+    w.el.tap('sw1');
+    await w.tick();
+    latest(w).deliver({ stopped: true });
+    await w.tick();
+    expect(q(w.el, '.listen').getAttribute('aria-checked')).toBe('false');
+
+    click(q(w.el, '.listen'));
+    await w.tick();
+    expect(w.subs).toHaveLength(2);
+    expect(text(q(w.el, '.press-hint'))).toContain('Press the device now');
+  });
+
+  it('also for a linked marker: Press to relink listens again after the prompt was ended', async () => {
+    const w = await mountWalk({ links: { sw1: MOTION } });
+    w.el.tap('sw1');
+    await w.tick();
+    click(q(w.el, '.press-relink'));
+    await w.tick();
+    latest(w).deliver({ stopped: true });
+    await w.tick();
+    click(q(w.el, '.press-relink'));
+    await w.tick();
+    expect(w.subs).toHaveLength(2);
+  });
+
+  it('shows the server message when listening is refused, is not listening, and listens when asked again', async () => {
+    const w = await mountWalk();
+    const subscribe = w.hass.connection.subscribeMessage;
+    w.hass.connection.subscribeMessage = vi.fn(async () => {
+      throw { code: 'not_allowed', message: 'Identifying needs an administrator and installer mode' };
+    }) as never;
+    w.el.tap('sw1');
+    await w.tick();
+    expect(text(q(w.el, '.notice.error'))).toBe('Identifying needs an administrator and installer mode');
+    expect(q(w.el, '.listen').getAttribute('aria-checked')).toBe('false');
+    expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
+
+    w.hass.connection.subscribeMessage = subscribe;
+    click(q(w.el, '.listen'));
+    await w.tick();
+    expect(w.subs).toHaveLength(1);
+    expect(text(q(w.el, '.press-hint'))).toContain('Press the device now');
+  });
+
   it('releases the subscription when the element is removed', async () => {
     const w = await mountWalk();
     w.el.tap('sw1');

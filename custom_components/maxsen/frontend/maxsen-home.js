@@ -3056,7 +3056,7 @@ var Bn = class {
 		for (let t of e) this.skipped.delete(t);
 		this.cursor = t, this.cursor >= this.queue.length && (this.cursor = 0);
 	}
-}, Vn = 5e3, Hn = "Select lights together, or other devices together, not both.", Un = 2e3, Wn = "Two devices reacted. Press once more.", Gn = "The walk stopped because installer mode was switched off.", Kn = "Identifying stopped because installer mode was switched off.", qn = "Tap the other lights that came on", Jn = (e) => typeof e.name == "string", Yn = (e, t) => (e ?? null) === (t ?? null) || e != null && t != null && e.type === t.type && e.id === t.id, Q = (e, t, n) => `${e} ${e === 1 ? t : n}`, $ = (e) => e.label || e.productName, Xn = (e) => _.has(e.categoryId);
+}, Vn = 5e3, Hn = "Select lights together, or other devices together, not both.", Un = 2e3, Wn = "Two devices reacted. Press once more.", Gn = "The walk stopped. Open Installer to carry on.", Kn = "Identifying stopped because installer mode was switched off.", qn = "Tap the other lights that came on", Jn = (e) => typeof e.name == "string", Yn = (e, t) => (e ?? null) === (t ?? null) || e != null && t != null && e.type === t.type && e.id === t.id, Q = (e, t, n) => `${e} ${e === 1 ? t : n}`, $ = (e) => e.label || e.productName, Xn = (e) => _.has(e.categoryId);
 function Zn(e) {
 	return [
 		`${Q(e.added.length, "new device", "new devices")} to link`,
@@ -3081,7 +3081,7 @@ var Qn = class extends V {
 		_group: { state: !0 },
 		_ambiguous: { state: !0 },
 		_includeOther: { state: !0 },
-		_pressing: { state: !0 }
+		_armed: { state: !0 }
 	};
 	_known = /* @__PURE__ */ new Map();
 	_dialogRun = 0;
@@ -3090,17 +3090,18 @@ var Qn = class extends V {
 	_stopListen;
 	_listenToken = 0;
 	_singleKey = "";
+	_singleFor;
 	_expected = /* @__PURE__ */ new Map();
 	_announced;
 	_connection;
 	constructor() {
-		super(), this._selected = [], this._multi = !1, this._search = "", this._busy = !1, this._phase = "waiting", this._ambiguous = !1, this._includeOther = !1, this._pressing = !1;
+		super(), this._selected = [], this._multi = !1, this._search = "", this._busy = !1, this._phase = "waiting", this._ambiguous = !1, this._includeOther = !1, this._armed = !1;
 	}
 	connectedCallback() {
 		super.connectedCallback(), this._bindConnection();
 	}
 	disconnectedCallback() {
-		super.disconnectedCallback(), this._bindConnection(), clearTimeout(this._noticeTimer), this._stopListening(), this._clearToast(), this._walk = void 0, this._group = void 0, this._pressing = !1, this._singleKey = "", this._expected.clear();
+		super.disconnectedCallback(), this._bindConnection(), clearTimeout(this._noticeTimer), this._stopListening(), this._clearToast(), this._walk = void 0, this._group = void 0, this._armed = !1, this._singleKey = "", this._singleFor = void 0, this._expected.clear();
 	}
 	willUpdate(e) {
 		if (e.has("hass") && this._bindConnection(), !e.has("home")) return;
@@ -3146,7 +3147,7 @@ var Qn = class extends V {
 		})), this._syncSingle();
 	}
 	_toggleMulti() {
-		this._multi = !this._multi, !this._multi && this._selected.length > 1 && this._select(this._selected.slice(0, 1));
+		this._multi = !this._multi, !this._multi && this._selected.length > 1 && this._select(this._selected.slice(0, 1)), this._syncSingle();
 	}
 	_say(e, t) {
 		this._notice = {
@@ -3159,11 +3160,22 @@ var Qn = class extends V {
 		if (!n || !r || this._busy) return !1;
 		let i = e === null ? this._selected.filter((e) => this.home?.links[e]) : this._selected;
 		if (i.length === 0) return !1;
+		let a = Object.fromEntries(i.map((e) => [e, this._walkHome()?.links[e] ?? null]));
 		this._busy = !0;
 		try {
 			await v(n, r, Object.fromEntries(i.map((t) => [t, e])), { nameDevice: e?.type === "device" });
-			let a = i.length > 1, o = e === null ? "Unlinked" : "Linked";
-			return this._say(a ? `${o} ${i.length} elements.` : t.name ? `${o}: ${t.name}` : `${o}.`, !1), this._select([]), e && this._walk && this._pickedInWalk(i, e), !0;
+			let o = this._walk?.current, s = o?.kind === "pick" && i.includes(o.elementId);
+			if (this._select([]), e && (s || t.undoable)) this._showToast({
+				link: e,
+				name: t.name ?? e.id,
+				ids: i,
+				previous: a
+			});
+			else {
+				let n = i.length > 1, r = e === null ? "Unlinked" : "Linked";
+				this._say(n ? `${r} ${i.length} elements.` : t.name ? `${r}: ${t.name}` : `${r}.`, !1);
+			}
+			return !0;
 		} catch (e) {
 			return this._say(m(e, "Could not save the link. Try again."), !0), !1;
 		} finally {
@@ -3175,8 +3187,9 @@ var Qn = class extends V {
 		e !== this._connection && (this._connection?.removeEventListener?.("ready", this._onReconnect), this._connection = e, e?.addEventListener?.("ready", this._onReconnect));
 	}
 	_onReconnect = () => {
+		this._listenToken++, this._stopListen = void 0;
 		let e = this._walk?.current;
-		this._walk ? this._phase === "waiting" && e && e.kind !== "pick" && this._listenForStep(e) : this._pressing && (this._singleKey = "", this._syncSingle());
+		this._walk ? this._phase === "waiting" && e && e.kind !== "pick" && this._listenForStep(e) : this._singleKey !== "" && (this._singleKey = "", this._syncSingle());
 	};
 	_listen(e, t) {
 		this._stopListening();
@@ -3220,17 +3233,22 @@ var Qn = class extends V {
 		this._walk ? this._phase === "waiting" && e && e.kind !== "pick" && this._listenForStep(e) : (this._singleKey = "", this._syncSingle());
 	}
 	_syncSingle() {
-		let e;
-		if (!this._walk && this._selected.length === 1) {
-			let t = this._known.get(this._selected[0] ?? "")?.el, n = t && Ln(t);
-			n && n.kind !== "pick" && (e = n);
+		let e = !this._walk && !this._multi && this._selected.length === 1 ? this._selected[0] : void 0;
+		e !== this._singleFor && (this._singleFor = e, this._armed = e !== void 0 && !this.home?.links[e]);
+		let t;
+		if (e !== void 0 && this._armed) {
+			let n = this._known.get(e)?.el, r = n && Ln(n);
+			r && r.kind !== "pick" && (t = r);
 		}
-		let t = e ? `${e.elementId}|${this._includeOther}` : "";
-		t !== this._singleKey && (this._singleKey = t, this._ambiguous = !1, this._pressing = e !== void 0, e ? this._listen(this._identifyOptions(e), (t) => void this._onSinglePress(e, t)) : this._stopListening());
+		let n = t ? `${t.elementId}|${this._includeOther}` : "";
+		n !== this._singleKey && (this._singleKey = n, this._ambiguous = !1, t ? this._listen(this._identifyOptions(t), (e) => void this._onSinglePress(t, e)) : this._stopListening());
+	}
+	_setArmed(e) {
+		this._armed = e, this._syncSingle();
 	}
 	async _onSinglePress(e, t) {
 		if ("stopped" in t) {
-			this._stopListening(), this._pressing = !1, this._say(Kn, !0);
+			this._stopListening(), this._armed = !1, this._say(Kn, !0);
 			return;
 		}
 		if ("ambiguous" in t) {
@@ -3240,7 +3258,10 @@ var Qn = class extends V {
 		if (!Jn(t)) return;
 		this._stopListening(), this._ambiguous = !1;
 		let n = this._linkOf(t);
-		this._selected.length === 1 && this._selected[0] === e.elementId && (await this._link(n, { name: this._nameOf(n, t.name) }) || (this._singleKey = "", this._syncSingle()));
+		this._selected.length === 1 && this._selected[0] === e.elementId && (await this._link(n, {
+			name: this._nameOf(n, t.name),
+			undoable: !0
+		}) || (this._singleKey = "", this._syncSingle()));
 	}
 	_startWalk() {
 		let e = this.home;
@@ -3297,7 +3318,10 @@ var Qn = class extends V {
 		}, this._phase = "others"));
 	}
 	_showToast(e) {
-		this._toast = e, this._phase = "linked", clearTimeout(this._toastTimer), this._toastTimer = setTimeout(() => this._advance(), Un);
+		this._toast = e, this._walk && (this._phase = "linked"), clearTimeout(this._toastTimer), this._toastTimer = setTimeout(() => this._toastOver(), Un);
+	}
+	_toastOver() {
+		this._walk ? this._advance() : this._clearToast();
 	}
 	_advance() {
 		let e = this._toast;
@@ -3337,20 +3361,23 @@ var Qn = class extends V {
 	}
 	async _undo() {
 		let { hass: e, entryId: t } = this, n = this._walk, r = this._toast ?? this._group;
-		if (!e || !t || !n || !r || this._busy) return;
+		if (!e || !t || !r || this._busy) return;
 		let i = this._toast;
 		clearTimeout(this._toastTimer), this._busy = !0;
 		try {
 			await v(e, t, r.previous);
 		} catch (e) {
-			this._say(m(e, "Could not undo the link. Try again."), !0), this._walk === n && i && this._advance();
+			this._say(m(e, "Could not undo the link. Try again."), !0), this._walk === n && i && this._toastOver();
 			return;
 		} finally {
 			this._busy = !1;
 		}
 		if (this._walk === n) {
-			for (let [e, t] of Object.entries(r.previous)) this._expected.set(e, t);
-			this._beginStep();
+			if (!n) this._clearToast();
+			else {
+				for (let [e, t] of Object.entries(r.previous)) this._expected.set(e, t);
+				this._beginStep();
+			}
 		}
 	}
 	_skip() {
@@ -3377,10 +3404,6 @@ var Qn = class extends V {
 		if (this._phase !== "waiting") return;
 		let r = t.current?.elementId;
 		t.jump(e.id), t.current?.elementId !== r && this._beginStep();
-	}
-	_pickedInWalk(e, t) {
-		let n = this._walk?.current;
-		n?.kind === "pick" && e.includes(n.elementId) && this._afterLinked(e, t);
 	}
 	_walkHome() {
 		let e = this.home;
@@ -3637,11 +3660,31 @@ var Qn = class extends V {
       <span>Include other devices</span>
     </button>`;
 	}
+	_renderListen(e) {
+		return N`<button
+      class="listen"
+      role="switch"
+      aria-checked=${e ? "true" : "false"}
+      @click=${() => this._setArmed(!e)}
+    >
+      <span class="track"><span class="knob"></span></span>
+      <span>Listen</span>
+    </button>`;
+	}
 	_renderPressHint() {
-		return this._walk || !this._pressing ? I : N`<div class="press-hint">
-      <p class="hint">Press the device now</p>
-      ${this._ambiguous ? N`<p class="press-warning" role="alert">${Wn}</p>` : I}
-      ${this._renderIncludeOther()}
+		if (this._walk || this._multi) return I;
+		let e = this._selected.length === 1 ? this._selected[0] : void 0, t = this._known.get(e ?? "")?.el;
+		return !e || !t || Ln(t).kind === "pick" ? I : this._armed ? N`<div class="press-hint">
+        <p class="hint">Press the device now</p>
+        ${this._ambiguous ? N`<p class="press-warning" role="alert">${Wn}</p>` : I}
+        ${this._renderListen(!0)} ${this._renderIncludeOther()}
+      </div>` : this.home?.links[e] ? N`<button class="press-relink" @click=${() => this._setArmed(!0)}>Press to relink</button>` : N`<div class="press-tools">${this._renderListen(!1)}</div>`;
+	}
+	_renderPressToast() {
+		let e = this._toast;
+		return this._walk || !e ? I : N`<div class="press-toast" role="status">
+      <span class="walk-linked">Linked: ${this._nameOf(e.link, e.name)}</span>
+      <button class="press-undo" ?disabled=${this._busy} @click=${() => void this._undo()}>Undo</button>
     </div>`;
 	}
 	_renderWalk() {
@@ -3662,7 +3705,7 @@ var Qn = class extends V {
           </div>` : N`<p class="walk-prompt" role="status">${this._phase === "others" ? qn : t.prompt}</p>`}
       ${this._ambiguous ? N`<p class="walk-warning" role="alert">${Wn}</p>` : I}
       <div class="walk-actions">
-        ${s ? N`<button class="walk-done primary" ?disabled=${this._busy} @click=${() => void this._doneGroup()}>Done</button>
+        ${s ? N`<button class="walk-done primary" ?disabled=${this._busy} @click=${() => void this._doneGroup()}>Link these lights</button>
               <button class="walk-undo" ?disabled=${this._busy} @click=${() => void this._undo()}>Undo</button>` : I}
         <button class="walk-back" ?disabled=${!a} @click=${() => this._back()}>Back</button>
         <button class="walk-skip" ?disabled=${!a} @click=${() => this._skip()}>Skip</button>
@@ -3677,11 +3720,11 @@ var Qn = class extends V {
 		}));
 	}
 	render() {
-		let e = this.home?.source === "file", t = this.home?.display?.background === "original", n = this._walk !== void 0, r = this._walk?.current?.kind === "pick";
+		let e = this.home?.source === "file", t = this.home?.display?.background === "original", n = this._walk !== void 0, r = this._walk?.current?.kind === "pick" && this._phase === "waiting";
 		return N`
       ${this._renderWalk()}
       <div class="toolbar">
-        <button class="done primary" @click=${this._done}>Done</button>
+        ${this._group ? I : N`<button class="done primary" @click=${this._done}>Done</button>`}
         ${n ? I : N`<button class="start-walk" ?disabled=${!this.home?.package} @click=${() => this._startWalk()}>
               Start linking walk
             </button>`}
@@ -3712,8 +3755,9 @@ var Qn = class extends V {
 			error: this._notice.error
 		})} role="status">${this._notice.text}</p>` : I}
       <div class="content">
-        ${n ? I : this._renderCounts()} ${!n || r ? this._renderSelection() : I}
-        ${this._renderPressHint()} ${!n || r ? this._renderCandidates() : I}
+        ${this._renderPressToast()} ${n ? I : this._renderCounts()}
+        ${!n || r ? this._renderSelection() : I} ${this._renderPressHint()}
+        ${!n || r ? this._renderCandidates() : I}
         ${this._renderNotDrawn()}
       </div>
       ${this._renderDialog()}
@@ -3769,6 +3813,7 @@ var Qn = class extends V {
       text-align: left;
     }
     .original-background .track,
+    .listen .track,
     .include-other .track {
       position: relative;
       flex: none;
@@ -3779,10 +3824,12 @@ var Qn = class extends V {
       transition: background 0.15s;
     }
     .original-background[aria-checked='true'] .track,
+    .listen[aria-checked='true'] .track,
     .include-other[aria-checked='true'] .track {
       background: var(--primary-color, #2f6fed);
     }
     .original-background .knob,
+    .listen .knob,
     .include-other .knob {
       position: absolute;
       top: 3px;
@@ -3794,8 +3841,47 @@ var Qn = class extends V {
       transition: transform 0.15s;
     }
     .original-background[aria-checked='true'] .knob,
+    .listen[aria-checked='true'] .knob,
     .include-other[aria-checked='true'] .knob {
       transform: translateX(18px);
+    }
+    .listen {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 44px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      font-size: 15px;
+    }
+    .press-relink {
+      min-height: 44px;
+      padding: 0 18px;
+      border: 1px solid var(--divider-color, #cfd3d9);
+      border-radius: 22px;
+      background: var(--card-background-color, #fff);
+      font-size: 16px;
+    }
+    .press-toast {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--primary-color, #2f6fed) 12%, transparent);
+      font-size: 17px;
+      font-weight: 600;
+    }
+    .press-undo {
+      min-height: 44px;
+      padding: 0 18px;
+      border: 1px solid var(--divider-color, #cfd3d9);
+      border-radius: 22px;
+      background: var(--card-background-color, #fff);
+      font-size: 16px;
     }
     .include-other {
       display: flex;
@@ -3866,7 +3952,7 @@ var Qn = class extends V {
       gap: 8px;
     }
     .walk button:not(.include-other),
-    .press-hint button:not(.include-other) {
+    .press-hint button:not(.include-other):not(.listen) {
       min-height: 44px;
       padding: 0 18px;
       border: 1px solid var(--divider-color, #cfd3d9);

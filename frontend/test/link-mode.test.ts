@@ -124,6 +124,9 @@ describe('toolbar', () => {
       '.not-drawn-row',
       '.walk button',
       '.include-other',
+      '.listen',
+      '.press-relink',
+      '.press-undo',
     ]) {
       const escaped = selector.replace(/\./g, '\\.');
       expect(css, selector).toMatch(new RegExp(`${escaped}[^{]*\\{[^}]*min-height:\\s*(4[4-9]|[5-9]\\d)px`));
@@ -1163,7 +1166,9 @@ describe('linking walk', () => {
       expect(linkCalls(w)).toEqual([{ type: 'maxsen/links/set', entry_id: 'e1', updates: { dl1: GANG2 } }]);
       expect(sub.unsub).toHaveBeenCalledTimes(1);
       expect(prompt(w)).toBe('Tap the other lights that came on');
-      expect(text(q(w.el, '.walk-done'))).toBe('Done');
+      expect(text(q(w.el, '.walk-done'))).toBe('Link these lights');
+      // The toolbar's Done would close link mode and drop the tapped lights: it is not offered meanwhile.
+      expect(root(w.el as HTMLElement).querySelector('.toolbar .done')).toBeNull();
       expect(w.current.at(-1)).toBe('dl1');
     });
 
@@ -1318,19 +1323,51 @@ describe('linking walk', () => {
       expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
     });
 
-    it('links the one picked, naming the device, and goes straight on', async () => {
-      const w = await mountWalk({ extra: withAircon, hass: aircon });
+    const pickAc = async (w: Walking) => {
       await startWalk(w);
       w.el.tap('ac1');
       await w.tick();
       click(q(w.el, '.candidate[data-link-id="dev-ac"]'));
       await w.tick();
+    };
+
+    it('links the one picked, naming the device, and shows Linked with Undo like any other step', async () => {
+      const w = await mountWalk({ extra: withAircon, hass: aircon });
+      await pickAc(w);
       expect(linkCalls(w)).toEqual([
         { type: 'maxsen/links/set', entry_id: 'e1', updates: { ac1: { type: 'device', id: 'dev-ac' } }, name_device: true },
       ]);
+      expect(text(q(w.el, '.walk-toast'))).toContain('Linked: Hall aircon');
+      expect(text(q(w.el, '.walk-undo'))).toBe('Undo');
+      expect(w.current.at(-1)).toBe('ac1');
+      expect(all(w.el, '.candidate')).toHaveLength(0);
+
       await w.pushHome();
-      expect(w.current.at(-1)).not.toBe('ac1');
+      await w.tick(2100);
       expect(root(w.el as HTMLElement).querySelector('.walk-toast')).toBeNull();
+      expect(w.current.at(-1)).not.toBe('ac1');
+    });
+
+    it('shows the name Home Assistant has now in that toast', async () => {
+      const w = await mountWalk({ extra: withAircon, hass: aircon });
+      await pickAc(w);
+      w.hass.devices['dev-ac'] = { ...w.hass.devices['dev-ac']!, name_by_user: 'Level 1 – Aircon Controller' };
+      w.el.hass = { ...w.hass };
+      await w.tick();
+      expect(text(q(w.el, '.walk-toast'))).toContain('Linked: Level 1 – Aircon Controller');
+    });
+
+    it('unlinks on Undo and shows the list again for the same element', async () => {
+      const w = await mountWalk({ extra: withAircon, hass: aircon });
+      await pickAc(w);
+      click(q(w.el, '.walk-undo'));
+      await w.tick();
+      expect(linkCalls(w).at(-1)).toEqual({ type: 'maxsen/links/set', entry_id: 'e1', updates: { ac1: null } });
+      expect(w.links).toEqual({});
+      expect(prompt(w)).toBe('Pick it from the list');
+      expect(candidateIds(w.el)).toEqual(['dev-ac']);
+      await w.tick(5000);
+      expect(w.current.at(-1)).toBe('ac1');
     });
   });
 
@@ -1382,9 +1419,14 @@ describe('linking walk', () => {
       w.reconnect();
       await w.tick();
       expect(w.subs).toHaveLength(2);
-      expect(before.unsub).toHaveBeenCalledTimes(1);
+      // The old subscription died with the socket: its unsubscribe would name a command id the new socket may reuse.
+      expect(before.unsub).not.toHaveBeenCalled();
       expect(latest(w).msg).toEqual(identifyMessage({ mode: 'device', kinds: ['cover'] }));
       expect(prompt(w)).toBe('Press open or close on the curtain switch');
+
+      click(q(w.el, '.walk-skip')); // the new subscription is ended as usual
+      await w.tick();
+      expect(w.subs[1]!.unsub).toHaveBeenCalledTimes(1);
     });
 
     it('leaves a step alone that is not waiting for a press, and a walk that is over', async () => {
@@ -1406,9 +1448,11 @@ describe('linking walk', () => {
       const w = await mountWalk();
       w.el.tap('sw1');
       await w.tick();
+      const before = latest(w);
       w.reconnect();
       await w.tick();
       expect(w.subs).toHaveLength(2);
+      expect(before.unsub).not.toHaveBeenCalled();
       expect(w.ready.size).toBe(1);
       w.el.remove();
       expect(w.ready.size).toBe(0);
@@ -1424,7 +1468,7 @@ describe('linking walk', () => {
       await w.tick();
 
       expect(root(w.el as HTMLElement).querySelector('.walk')).toBeNull();
-      expect(text(q(w.el, '.notice.error'))).toBe('The walk stopped because installer mode was switched off.');
+      expect(text(q(w.el, '.notice.error'))).toBe('The walk stopped. Open Installer to carry on.');
       expect(w.current.at(-1)).toBeUndefined();
       expect(sub.unsub).toHaveBeenCalledTimes(1);
       expect(q<HTMLButtonElement>(w.el, '.start-walk').disabled).toBe(false);
@@ -1461,7 +1505,7 @@ describe('press to identify', () => {
     expect(linkCalls(w)).toEqual([
       { type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: HALL }, name_device: true },
     ]);
-    expect(text(q(w.el, '.notice'))).toBe('Linked: Hall switch');
+    expect(text(q(w.el, '.press-toast'))).toBe('Linked: Hall switch Undo');
     expect(w.selections.at(-1)).toEqual([]);
     expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
     expect(sub.unsub).toHaveBeenCalledTimes(1);
@@ -1476,7 +1520,38 @@ describe('press to identify', () => {
     latest(w).deliver({ entity_id: 'switch.l1_gang2', name: 'Level 1 gang 2' });
     await w.tick();
     expect(linkCalls(w)).toEqual([{ type: 'maxsen/links/set', entry_id: 'e1', updates: { dl1: GANG2 } }]);
-    expect(text(q(w.el, '.notice'))).toBe('Linked: Level 1 gang 2');
+    expect(text(q(w.el, '.press-toast'))).toBe('Linked: Level 1 gang 2 Undo');
+  });
+
+  it('shows the link for 2 seconds with Undo, which unlinks; the toast shows the name Home Assistant has now', async () => {
+    const w = await mountWalk();
+    w.el.tap('sw1');
+    await w.tick();
+    latest(w).deliver({ device_id: 'dev-hall', name: 'Hall switch' });
+    await w.tick();
+    w.hass.devices['dev-hall'] = { ...w.hass.devices['dev-hall']!, name_by_user: 'Level 1 – Entrance switch' };
+    w.el.hass = { ...w.hass };
+    await w.tick(1000);
+    expect(text(q(w.el, '.press-toast'))).toBe('Linked: Level 1 – Entrance switch Undo');
+
+    click(q(w.el, '.press-undo'));
+    await w.tick();
+    expect(linkCalls(w).at(-1)).toEqual({ type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: null } });
+    expect(w.links).toEqual({});
+    expect(root(w.el as HTMLElement).querySelector('.press-toast')).toBeNull();
+    await w.tick(5000);
+    expect(root(w.el as HTMLElement).querySelector('.press-toast')).toBeNull();
+  });
+
+  it('lets the toast go after 2 seconds', async () => {
+    const w = await mountWalk();
+    w.el.tap('sw1');
+    await w.tick();
+    latest(w).deliver({ device_id: 'dev-hall', name: 'Hall switch' });
+    await w.tick(1900);
+    expect(root(w.el as HTMLElement).querySelector('.press-toast')).not.toBeNull();
+    await w.tick(200);
+    expect(root(w.el as HTMLElement).querySelector('.press-toast')).toBeNull();
   });
 
   it('listens again when the link cannot be saved, and keeps the selection', async () => {
@@ -1519,16 +1594,100 @@ describe('press to identify', () => {
     expect(second.unsub).toHaveBeenCalledTimes(1);
     expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
 
-    click(q(w.el, '.multi'));
     w.el.tap('dl1');
     await w.tick();
     const light = latest(w);
     expect(light.msg).toEqual(identifyMessage({ mode: 'entity', kinds: ['light_gang'] }));
-    w.el.tap('dl2'); // two markers: no single device to listen for
+    click(q(w.el, '.multi')); // Select several never listens
     await w.tick();
     expect(light.unsub).toHaveBeenCalledTimes(1);
     expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
+    expect(root(w.el as HTMLElement).querySelector('.press-relink')).toBeNull();
+    w.el.tap('dl1'); // off, then on again
+    w.el.tap('dl1');
+    w.el.tap('dl2');
+    await w.tick();
     expect(w.subs).toHaveLength(3);
+  });
+
+  it('never listens in Select several, not even for the first marker tapped', async () => {
+    const w = await mountWalk();
+    click(q(w.el, '.multi'));
+    await w.tick();
+    w.el.tap('sw1');
+    await w.tick();
+    expect(w.subs).toHaveLength(0);
+    expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
+    expect(root(w.el as HTMLElement).querySelector('.press-tools')).toBeNull();
+  });
+
+  it('has a Listen switch, on for an unlinked marker, that stops and starts the listening', async () => {
+    const w = await mountWalk();
+    w.el.tap('sw1');
+    await w.tick();
+    const listen = () => q<HTMLButtonElement>(w.el, '.listen');
+    expect(text(listen())).toBe('Listen');
+    expect(listen().getAttribute('role')).toBe('switch');
+    expect(listen().getAttribute('aria-checked')).toBe('true');
+    const first = latest(w);
+
+    click(listen());
+    await w.tick();
+    expect(listen().getAttribute('aria-checked')).toBe('false');
+    expect(first.unsub).toHaveBeenCalledTimes(1);
+    expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
+
+    click(listen());
+    await w.tick();
+    expect(w.subs).toHaveLength(2);
+    expect(text(q(w.el, '.press-hint'))).toContain('Press the device now');
+
+    // Another marker is listened for afresh, whatever the switch said.
+    click(listen());
+    await w.tick();
+    w.el.tap('sen1');
+    await w.tick();
+    expect(listen().getAttribute('aria-checked')).toBe('true');
+    expect(latest(w).msg).toEqual(identifyMessage({ mode: 'device', kinds: ['binary_sensor'] }));
+  });
+
+  it('does not listen for a marker that already has a link until Press to relink is tapped', async () => {
+    const w = await mountWalk({ links: { sw1: MOTION } });
+    w.el.tap('sw1');
+    await w.tick();
+    expect(w.subs).toHaveLength(0);
+    expect(root(w.el as HTMLElement).querySelector('.press-hint')).toBeNull();
+    expect(text(q(w.el, '.press-relink'))).toBe('Press to relink');
+
+    click(q(w.el, '.press-relink'));
+    await w.tick();
+    expect(w.subs).toHaveLength(1);
+    expect(latest(w).msg).toEqual(identifyMessage({ mode: 'device', kinds: ['switch'], gangs: 3 }));
+    expect(text(q(w.el, '.press-hint'))).toContain('Press the device now');
+    expect(root(w.el as HTMLElement).querySelector('.press-relink')).toBeNull();
+
+    // The press relinks it, and Undo gives the old link back.
+    latest(w).deliver({ device_id: 'dev-hall', name: 'Hall switch' });
+    await w.tick();
+    expect(linkCalls(w)).toEqual([
+      { type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: HALL }, name_device: true },
+    ]);
+    click(q(w.el, '.press-undo'));
+    await w.tick();
+    expect(linkCalls(w).at(-1)).toEqual({ type: 'maxsen/links/set', entry_id: 'e1', updates: { sw1: MOTION } });
+    expect(w.links).toEqual({ sw1: MOTION });
+  });
+
+  it('asks again for Press to relink when another linked marker is selected', async () => {
+    const w = await mountWalk({ links: { sw1: MOTION, sen1: HALL } });
+    w.el.tap('sw1');
+    await w.tick();
+    click(q(w.el, '.press-relink'));
+    await w.tick();
+    w.el.tap('sen1');
+    await w.tick();
+    expect(root(w.el as HTMLElement).querySelector('.press-relink')).not.toBeNull();
+    expect(latest(w).unsub).toHaveBeenCalledTimes(1);
   });
 
   it('listens again with include_other when the switch is turned on', async () => {

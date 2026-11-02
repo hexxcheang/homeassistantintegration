@@ -30,7 +30,7 @@ const MIXED_KINDS = 'Select lights together, or other devices together, not both
 /** How long "Linked: …" stays, with its Undo, before the walk moves on. */
 const TOAST_MS = 2000;
 const AMBIGUOUS = 'Two devices reacted. Press once more.';
-const WALK_STOPPED = 'The walk stopped because installer mode was switched off.';
+const WALK_STOPPED = 'The walk stopped. Open Installer to carry on.';
 const IDENTIFY_STOPPED = 'Identifying stopped because installer mode was switched off.';
 const OTHER_LIGHTS = 'Tap the other lights that came on';
 
@@ -124,7 +124,7 @@ export class MaxsenLinkMode extends LitElement {
     _group: { state: true },
     _ambiguous: { state: true },
     _includeOther: { state: true },
-    _pressing: { state: true },
+    _armed: { state: true },
   };
 
   declare hass: HassLike | undefined;
@@ -145,8 +145,8 @@ export class MaxsenLinkMode extends LitElement {
   declare private _ambiguous: boolean;
   /** Count devices that are not Zigbee too. */
   declare private _includeOther: boolean;
-  /** Listening for the press of the one selected marker (outside the walk). */
-  declare private _pressing: boolean;
+  /** The press of the one selected marker is being listened for (outside the walk): on for an unlinked marker, off until asked for a linked one. */
+  declare private _armed: boolean;
 
   private _known = new Map<string, Known>();
   /** Bumped when the dialog is closed, so an answer that arrives later does not reopen it. */
@@ -159,6 +159,8 @@ export class MaxsenLinkMode extends LitElement {
   private _listenToken = 0;
   /** What the single-marker press is listening for ('' for nothing), to subscribe only on a change. */
   private _singleKey = '';
+  /** The one marker the press listening is about, to arm it afresh when another is selected. */
+  private _singleFor: string | undefined;
   /** Links this element wrote that the home it was given may not show yet; see `_walkHome`. */
   private _expected = new Map<string, Link | null>();
   /** The element id last announced with `maxsen-current`. */
@@ -175,7 +177,7 @@ export class MaxsenLinkMode extends LitElement {
     this._phase = 'waiting';
     this._ambiguous = false;
     this._includeOther = false;
-    this._pressing = false;
+    this._armed = false;
   }
 
   override connectedCallback(): void {
@@ -192,8 +194,9 @@ export class MaxsenLinkMode extends LitElement {
     this._clearToast();
     this._walk = undefined;
     this._group = undefined;
-    this._pressing = false;
+    this._armed = false;
     this._singleKey = '';
+    this._singleFor = undefined;
     this._expected.clear();
   }
 
@@ -259,6 +262,7 @@ export class MaxsenLinkMode extends LitElement {
   private _toggleMulti(): void {
     this._multi = !this._multi;
     if (!this._multi && this._selected.length > 1) this._select(this._selected.slice(0, 1));
+    this._syncSingle(); // never listens in Select several
   }
 
   private _say(text: string, error: boolean): void {
@@ -272,30 +276,34 @@ export class MaxsenLinkMode extends LitElement {
   /**
    * Link the selected elements to `link` (or unlink them). A device link also names the device
    * after its marker and puts it in its level's area, however the link was made (the server leaves
-   * a device a person named alone); `name` is what the notice calls the link.
+   * a device a person named alone); `name` is what the notice calls the link. A link found by a
+   * press, or picked on a walk step, is shown for 2 s as "Linked: …" with Undo, as the walk does.
    * Resolves to whether the link was saved.
    */
-  private async _link(
-    link: Link | null,
-    options: { name?: string } = {},
-  ): Promise<boolean> {
+  private async _link(link: Link | null, options: { name?: string; undoable?: boolean } = {}): Promise<boolean> {
     const { hass, entryId } = this;
     if (!hass || !entryId || this._busy) return false;
     const targets = link === null ? this._selected.filter((id) => this.home?.links[id]) : this._selected;
     if (targets.length === 0) return false;
+    const previous = Object.fromEntries(targets.map((id) => [id, this._walkHome()?.links[id] ?? null]));
     this._busy = true;
     try {
       await setLinks(hass, entryId, Object.fromEntries(targets.map((id) => [id, link])), {
         nameDevice: link?.type === 'device',
       });
-      const many = targets.length > 1;
-      const verb = link === null ? 'Unlinked' : 'Linked';
-      this._say(
-        many ? `${verb} ${targets.length} elements.` : options.name ? `${verb}: ${options.name}` : `${verb}.`,
-        false,
-      );
+      const step = this._walk?.current;
+      const picked = step?.kind === 'pick' && targets.includes(step.elementId);
       this._select([]);
-      if (link && this._walk) this._pickedInWalk(targets, link);
+      if (link && (picked || options.undoable)) {
+        this._showToast({ link, name: options.name ?? link.id, ids: targets, previous });
+      } else {
+        const many = targets.length > 1;
+        const verb = link === null ? 'Unlinked' : 'Linked';
+        this._say(
+          many ? `${verb} ${targets.length} elements.` : options.name ? `${verb}: ${options.name}` : `${verb}.`,
+          false,
+        );
+      }
       return true;
     } catch (err) {
       this._say(errorMessage(err, 'Could not save the link. Try again.'), true);
@@ -320,10 +328,14 @@ export class MaxsenLinkMode extends LitElement {
    * `resubscribe: false` is not brought back), so ask it again for the step the installer is on.
    */
   private _onReconnect = (): void => {
+    // The old subscription died with the socket. Its unsubscribe would name a command id the new
+    // socket may use for something else, so it is dropped, not called.
+    this._listenToken++;
+    this._stopListen = undefined;
     const step = this._walk?.current;
     if (this._walk) {
       if (this._phase === 'waiting' && step && step.kind !== 'pick') this._listenForStep(step);
-    } else if (this._pressing) {
+    } else if (this._singleKey !== '') {
       this._singleKey = '';
       this._syncSingle();
     }
@@ -391,11 +403,20 @@ export class MaxsenLinkMode extends LitElement {
 
   // ---- press to identify, outside the walk ----
 
-  /** With exactly one marker selected (and no walk), listen for the press of its device. */
+  /**
+   * With exactly one marker selected (not in Select several, not in a walk), listen for the press of
+   * its device: at once for an unlinked marker (the Listen switch can turn it off), only after
+   * "Press to relink" for a linked one, so a light switched by someone else cannot overwrite a link.
+   */
   private _syncSingle(): void {
+    const only = !this._walk && !this._multi && this._selected.length === 1 ? this._selected[0] : undefined;
+    if (only !== this._singleFor) {
+      this._singleFor = only;
+      this._armed = only !== undefined && !this.home?.links[only];
+    }
     let step: PressStep | undefined;
-    if (!this._walk && this._selected.length === 1) {
-      const el = this._known.get(this._selected[0] ?? '')?.el;
+    if (only !== undefined && this._armed) {
+      const el = this._known.get(only)?.el;
       const found = el && stepFor(el);
       if (found && found.kind !== 'pick') step = found;
     }
@@ -403,7 +424,6 @@ export class MaxsenLinkMode extends LitElement {
     if (key === this._singleKey) return;
     this._singleKey = key;
     this._ambiguous = false;
-    this._pressing = step !== undefined;
     if (!step) {
       this._stopListening();
       return;
@@ -411,10 +431,15 @@ export class MaxsenLinkMode extends LitElement {
     this._listen(this._identifyOptions(step), (result) => void this._onSinglePress(step, result));
   }
 
+  private _setArmed(armed: boolean): void {
+    this._armed = armed;
+    this._syncSingle();
+  }
+
   private async _onSinglePress(step: PressStep, result: IdentifyResult): Promise<void> {
     if ('stopped' in result) {
       this._stopListening();
-      this._pressing = false;
+      this._armed = false;
       this._say(IDENTIFY_STOPPED, true);
       return;
     }
@@ -428,7 +453,7 @@ export class MaxsenLinkMode extends LitElement {
     const link = this._linkOf(result);
     // The installer may have selected something else while the press was on its way.
     if (this._selected.length !== 1 || this._selected[0] !== step.elementId) return;
-    const saved = await this._link(link, { name: this._nameOf(link, result.name) });
+    const saved = await this._link(link, { name: this._nameOf(link, result.name), undoable: true });
     if (!saved) {
       // Still selected: listen again.
       this._singleKey = '';
@@ -535,9 +560,15 @@ export class MaxsenLinkMode extends LitElement {
 
   private _showToast(toast: Toast): void {
     this._toast = toast;
-    this._phase = 'linked';
+    if (this._walk) this._phase = 'linked';
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => this._advance(), TOAST_MS);
+    this._toastTimer = setTimeout(() => this._toastOver(), TOAST_MS);
+  }
+
+  /** The 2 seconds are up: the walk moves on; outside the walk the toast just goes. */
+  private _toastOver(): void {
+    if (this._walk) this._advance();
+    else this._clearToast();
   }
 
   /** The toast is over: what was linked leaves the walk, and the next element is asked about. */
@@ -593,7 +624,7 @@ export class MaxsenLinkMode extends LitElement {
     const { hass, entryId } = this;
     const walk = this._walk;
     const done = this._toast ?? this._group;
-    if (!hass || !entryId || !walk || !done || this._busy) return;
+    if (!hass || !entryId || !done || this._busy) return;
     const toast = this._toast;
     clearTimeout(this._toastTimer);
     this._busy = true;
@@ -602,12 +633,16 @@ export class MaxsenLinkMode extends LitElement {
     } catch (err) {
       this._say(errorMessage(err, 'Could not undo the link. Try again.'), true);
       // Still linked: carry on as if it had been left.
-      if (this._walk === walk && toast) this._advance();
+      if (this._walk === walk && toast) this._toastOver();
       return;
     } finally {
       this._busy = false;
     }
     if (this._walk !== walk) return;
+    if (!walk) {
+      this._clearToast();
+      return;
+    }
     for (const [id, link] of Object.entries(done.previous)) this._expected.set(id, link);
     this._beginStep();
   }
@@ -644,12 +679,6 @@ export class MaxsenLinkMode extends LitElement {
     const before = walk.current?.elementId;
     walk.jump(el.id);
     if (walk.current?.elementId !== before) this._beginStep();
-  }
-
-  /** A device was picked from the list while the walk is on a pick step. */
-  private _pickedInWalk(ids: string[], link: Link): void {
-    const step = this._walk?.current;
-    if (step?.kind === 'pick' && ids.includes(step.elementId)) this._afterLinked(ids, link);
   }
 
   /**
@@ -959,13 +988,44 @@ export class MaxsenLinkMode extends LitElement {
     </button>`;
   }
 
-  /** Outside the walk: with one marker selected, the hint to press its device. */
+  private _renderListen(armed: boolean): TemplateResult {
+    return html`<button
+      class="listen"
+      role="switch"
+      aria-checked=${armed ? 'true' : 'false'}
+      @click=${() => this._setArmed(!armed)}
+    >
+      <span class="track"><span class="knob"></span></span>
+      <span>Listen</span>
+    </button>`;
+  }
+
+  /** Outside the walk: with one marker selected, listening for the press of its device. */
   private _renderPressHint(): TemplateResult | typeof nothing {
-    if (this._walk || !this._pressing) return nothing;
-    return html`<div class="press-hint">
-      <p class="hint">Press the device now</p>
-      ${this._ambiguous ? html`<p class="press-warning" role="alert">${AMBIGUOUS}</p>` : nothing}
-      ${this._renderIncludeOther()}
+    if (this._walk || this._multi) return nothing;
+    const id = this._selected.length === 1 ? this._selected[0] : undefined;
+    const el = this._known.get(id ?? '')?.el;
+    if (!id || !el || stepFor(el).kind === 'pick') return nothing;
+    if (this._armed) {
+      return html`<div class="press-hint">
+        <p class="hint">Press the device now</p>
+        ${this._ambiguous ? html`<p class="press-warning" role="alert">${AMBIGUOUS}</p>` : nothing}
+        ${this._renderListen(true)} ${this._renderIncludeOther()}
+      </div>`;
+    }
+    // A linked marker is only listened for when asked: a press elsewhere must not overwrite its link.
+    return this.home?.links[id]
+      ? html`<button class="press-relink" @click=${() => this._setArmed(true)}>Press to relink</button>`
+      : html`<div class="press-tools">${this._renderListen(false)}</div>`;
+  }
+
+  /** Outside the walk: what a press linked, for 2 seconds, with Undo. */
+  private _renderPressToast(): TemplateResult | typeof nothing {
+    const toast = this._toast;
+    if (this._walk || !toast) return nothing;
+    return html`<div class="press-toast" role="status">
+      <span class="walk-linked">Linked: ${this._nameOf(toast.link, toast.name)}</span>
+      <button class="press-undo" ?disabled=${this._busy} @click=${() => void this._undo()}>Undo</button>
     </div>`;
   }
 
@@ -996,7 +1056,7 @@ export class MaxsenLinkMode extends LitElement {
       ${this._ambiguous ? html`<p class="walk-warning" role="alert">${AMBIGUOUS}</p>` : nothing}
       <div class="walk-actions">
         ${group
-          ? html`<button class="walk-done primary" ?disabled=${this._busy} @click=${() => void this._doneGroup()}>Done</button>
+          ? html`<button class="walk-done primary" ?disabled=${this._busy} @click=${() => void this._doneGroup()}>Link these lights</button>
               <button class="walk-undo" ?disabled=${this._busy} @click=${() => void this._undo()}>Undo</button>`
           : nothing}
         <button class="walk-back" ?disabled=${!waiting} @click=${() => this._back()}>Back</button>
@@ -1016,11 +1076,11 @@ export class MaxsenLinkMode extends LitElement {
     const fromFile = this.home?.source === 'file';
     const original = this.home?.display?.background === 'original';
     const walking = this._walk !== undefined;
-    const picking = this._walk?.current?.kind === 'pick';
+    const picking = this._walk?.current?.kind === 'pick' && this._phase === 'waiting';
     return html`
       ${this._renderWalk()}
       <div class="toolbar">
-        <button class="done primary" @click=${this._done}>Done</button>
+        ${this._group ? nothing : html`<button class="done primary" @click=${this._done}>Done</button>`}
         ${walking
           ? nothing
           : html`<button class="start-walk" ?disabled=${!this.home?.package} @click=${() => this._startWalk()}>
@@ -1054,8 +1114,9 @@ export class MaxsenLinkMode extends LitElement {
         ? html`<p class=${classMap({ notice: true, error: this._notice.error })} role="status">${this._notice.text}</p>`
         : nothing}
       <div class="content">
-        ${walking ? nothing : this._renderCounts()} ${!walking || picking ? this._renderSelection() : nothing}
-        ${this._renderPressHint()} ${!walking || picking ? this._renderCandidates() : nothing}
+        ${this._renderPressToast()} ${walking ? nothing : this._renderCounts()}
+        ${!walking || picking ? this._renderSelection() : nothing} ${this._renderPressHint()}
+        ${!walking || picking ? this._renderCandidates() : nothing}
         ${this._renderNotDrawn()}
       </div>
       ${this._renderDialog()}
@@ -1112,6 +1173,7 @@ export class MaxsenLinkMode extends LitElement {
       text-align: left;
     }
     .original-background .track,
+    .listen .track,
     .include-other .track {
       position: relative;
       flex: none;
@@ -1122,10 +1184,12 @@ export class MaxsenLinkMode extends LitElement {
       transition: background 0.15s;
     }
     .original-background[aria-checked='true'] .track,
+    .listen[aria-checked='true'] .track,
     .include-other[aria-checked='true'] .track {
       background: var(--primary-color, #2f6fed);
     }
     .original-background .knob,
+    .listen .knob,
     .include-other .knob {
       position: absolute;
       top: 3px;
@@ -1137,8 +1201,47 @@ export class MaxsenLinkMode extends LitElement {
       transition: transform 0.15s;
     }
     .original-background[aria-checked='true'] .knob,
+    .listen[aria-checked='true'] .knob,
     .include-other[aria-checked='true'] .knob {
       transform: translateX(18px);
+    }
+    .listen {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 44px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      font-size: 15px;
+    }
+    .press-relink {
+      min-height: 44px;
+      padding: 0 18px;
+      border: 1px solid var(--divider-color, #cfd3d9);
+      border-radius: 22px;
+      background: var(--card-background-color, #fff);
+      font-size: 16px;
+    }
+    .press-toast {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--primary-color, #2f6fed) 12%, transparent);
+      font-size: 17px;
+      font-weight: 600;
+    }
+    .press-undo {
+      min-height: 44px;
+      padding: 0 18px;
+      border: 1px solid var(--divider-color, #cfd3d9);
+      border-radius: 22px;
+      background: var(--card-background-color, #fff);
+      font-size: 16px;
     }
     .include-other {
       display: flex;
@@ -1209,7 +1312,7 @@ export class MaxsenLinkMode extends LitElement {
       gap: 8px;
     }
     .walk button:not(.include-other),
-    .press-hint button:not(.include-other) {
+    .press-hint button:not(.include-other):not(.listen) {
       min-height: 44px;
       padding: 0 18px;
       border: 1px solid var(--divider-color, #cfd3d9);

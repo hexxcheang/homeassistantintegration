@@ -1,7 +1,7 @@
 # Maxsen Home: 3D view — Design
 
 Date: 2026-11-07
-Status: Draft, awaiting owner approval
+Status: Approved 2026-11-07 (owner: approach 2, NeonPlan look, everyday screen, whole panel dark in 3D)
 Builds on: `2026-11-01-maxsen-floorplan-dashboard-design.md`, `2026-11-01-panel-polish-design.md`
 Depends on: the **clean drawing from photos** project (not yet designed), which produces the room
 and wall data this view needs. See *Input* below.
@@ -113,7 +113,11 @@ level.rooms: {
      free-standing.
    The rooms layer may carry optional per-element overrides, `mounts: { [elementId]: { height?,
    wall?: [from, to] } }`, for the planner to fill in later; the 3D uses them when present.
-4. **Dark look:** see the open question below; the doc is updated once the owner answers.
+4. **Dark look across the whole panel** (owner's decision, 2026-11-07). While the 3D layer is shown,
+   the whole Home panel goes dark: header and logo, level and layer bars, the quick panel and its
+   tiles, and the room tiles shown on entering a room. The 2D layers keep today's light look. The
+   dashboard card follows its dashboard's theme and only its house is dark. Both looks are tested
+   in light and dark Home Assistant themes.
 
 ## The look (within the NeonPlan style)
 

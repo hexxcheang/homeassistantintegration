@@ -42,6 +42,11 @@ home we already have, not a new product.
    - sensors: a small pill, lit while the sensor is on (motion / door open);
    - aircon: the mode badge from 2D ("cool · 22°") above the unit;
    - unlinked devices: drawn dashed/dim, as in 2D.
+   **Carpentry and furniture** (owner, 2026-11-07) from the home package's `furniture[]`: drawn as
+   simple blocks in the neon style (dark translucent bodies with glowing edges, a few shapes per
+   type: bed with a raised head, sofa with a back, table with legs, wardrobe and cabinets as tall
+   boxes, TV console with a screen panel), at their planned spot, size and rotation. They are not
+   tappable; they give the rooms their shape and make the house readable.
 3. **Same taps as 2D.** Tap a device to switch it, hold for details, overlap picker for crowded
    spots. Tap a room's floor to **enter the room**: the camera flies in, that room's ceiling goes
    away, and the quick-panel slot shows that room's devices as tiles. **Back** returns to the house.
@@ -54,8 +59,8 @@ home we already have, not a new product.
 
 ## Non-goals
 
-- Furniture, roofs, gardens, pools, solar, energy flows, cars, a walk-through mode, day/night sun,
-  "time travel" history. Walls, floors and devices only, for now.
+- Roofs, gardens, pools, solar, energy flows, cars, a walk-through mode, day/night sun, "time
+  travel" history. Walls, floors, devices and furniture blocks only.
 - Drawing or editing the home inside Home Assistant. The planner is the editor.
 - Several levels stacked in one picture. One level at a time, chosen with today's level pills.
 - Replacing the 2D views: they stay, and linking stays 2D.
@@ -74,6 +79,8 @@ The home package (`maxsen-home`, schema 1) gains an optional **rooms layer** per
 the clean-drawing project. This design fixes its shape so that project knows what to deliver:
 
 ```
+level.furniture: [{ id, type, roomId, x, y, rotation, width, depth, height, builtIn }]
+  // x, y and rotation in plan units/degrees; sizes in metres; builtIn marks carpentry
 level.rooms: {
   scale: number,                 // metres per plan unit (plan units are the scene's 1000-wide space)
   wallHeight?: number,           // metres, default 2.6
@@ -184,7 +191,8 @@ level.rooms: {
    licence requires keeping their copyright notice and an "includes code from NeonPlan 3D" line,
    and its devices are placed per room rather than at the planned spot.
 2. **Our own 3D layer in Maxsen Home.** Chosen. 100 % Maxsen, same links and installer flow, every
-   downlight at its planned spot. Costs more build time and starts without furniture.
+   downlight at its planned spot. Costs more build time; furniture is simple blocks rather than
+   detailed models.
 3. **Generate NeonPlan files from the planner.** Cheapest, but the customer still sees NeonPlan's
    name and account prompt, which fails the reason for the project.
 

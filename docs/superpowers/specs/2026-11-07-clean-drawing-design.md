@@ -32,27 +32,42 @@ reading from boxes to real outlines and turns the checked result into a drawing 
    a polygon (not a box), plus doors (hinge end, latch end, which room the leaf swings into), windows
    (two ends on the wall), **fixtures** (type and footprint) and the scale. Rooms get their name and
    type as today.
-2. **Staff correct it in seconds.** The outlines are laid over the photo. Staff drag any corner,
+2. **Carpentry and furniture are part of the plan** (owner, 2026-11-07). The reading also picks
+   up what the plan draws; staff add, move, turn and resize the rest from a built-in library with
+   standard Singapore sizes. Two kinds:
+   - **Carpentry (built-ins):** wardrobe, kitchen base and wall cabinets, island, TV console and
+     feature wall, study table, vanity, shoe cabinet, bay-window seat, bedhead panel, storage
+     platform bed, bomb-shelter shelving.
+   - **Loose furniture and appliances:** bed (single/queen/king), bedside tables, sofa (2/3-seat,
+     L-shape), coffee table, dining table with chairs, fridge, washer/dryer, dining pendant spot.
+   Each item has a type, position, rotation, width, depth and height (defaults from the library),
+   and the room it is in. Furniture is drawn on the clean plan as plan symbols, carried to Home
+   Assistant for the 3D view, and used by Magic Plan in place of the bed, sofa and TV it guesses
+   today, so lights follow the real layout.
+3. **Staff correct it in seconds.** The outlines are laid over the photo. Staff drag any corner,
    add or delete a corner, split or merge rooms, add a missed door or window, rename a room. A dragged
    corner **snaps to the nearest wall line in the photo**, so corrections land exactly on the wall.
    The existing room list and presets (Singapore flat types) still seed the room names.
-3. **A clean drawing in Maxsen style**, generated from the checked outlines: walls with thickness
+4. **A clean drawing in Maxsen style**, generated from the checked outlines: walls with thickness
    (outer walls thicker), door leaves with swing arcs, windows as glazed wall sections, fixture
    symbols, room names, optional dimensions. It becomes the **background of both plans of the level**
    (Smart Home and Lighting) in place of the photo, so the editor, the PDF export and Home Assistant
    all show it. The photo stays available as a faint **underlay toggle** in the editor for checking.
-4. **Devices stay put.** The clean drawing is rendered in the photo's own frame (same width, height
+5. **Devices stay put.** The clean drawing is rendered in the photo's own frame (same width, height
    and crop), so every marker, strip and curtain already placed keeps its coordinates. Re-running
    the reading or editing outlines never moves a device.
-5. **The home package carries the data**: the optional `rooms` layer per level, exactly as the 3D
-   design fixes it (`scale`, `wallHeight`, `rooms[]` with `polygon`, `walls[]`, `openings[]`), in
-   plan units, plus the clean drawing as the level's background image.
-6. **Magic Plan keeps working.** It plans from boxes today; it receives each polygon's main
+6. **The home package carries the data**: the optional `rooms` layer per level, exactly as the 3D
+   design fixes it (`scale`, `wallHeight`, `rooms[]` with `polygon`, `walls[]`, `openings[]`), plus
+   `furniture[]` (`{ id, type, roomId, x, y, rotation, width, depth, height, builtIn }` in plan
+   units and metres), in plan units, plus the clean drawing as the level's background image.
+7. **Magic Plan keeps working.** It plans from boxes today; it receives each polygon's main
    rectangle and extra parts derived automatically, so its rules need no change in this project.
 
 ## Non-goals
 
-- Furniture beyond what the plan shows as fixtures (no sofas or beds unless drawn on the plan).
+- Furniture outside the library (a custom piece is placed as a generic box with a name).
+- Quoting or selling carpentry: the furniture is for the drawing, the 3D and lighting placement,
+  not a renovation quote.
 - Tracing walls by computer vision alone (see *Approaches*).
 - Curved walls as true curves: they become short straight segments, which is fine for a plan.
 - The 3D view itself (separate design).
@@ -85,9 +100,10 @@ The analysis schema (`packages/domain/src/magic/analysis.ts`) gains outlines and
 
 - `rooms[].outline: [{x, y}, …]` as fractions of the image, following the **inside faces** of the
   walls, corners in order. The box (`x, y, w, h`) stays, computed from the outline, for Magic Plan.
-- `fixtures[]: { id, type, roomId, outline | (box + rotation) }` with types `wc`, `basin`, `bath`,
-  `shower`, `kitchen-counter`, `sink`, `hob`, `wardrobe`, `bed`, `sofa`, `table`, `other`; only what
-  is drawn on the plan.
+- `fixtures[]: { id, type, roomId, outline | (box + rotation) }` for sanitary and kitchen fixtures
+  drawn on the plan (`wc`, `basin`, `bath`, `shower`, `sink`, `hob`), and `furniture[]` with the
+  same shape for carpentry and furniture the plan shows, typed from the library list above; only
+  what is drawn. Staff add the rest in the editor.
 - Doors and windows as today (hinge/latch, swing side; window ends), plus `walls[]` for partitions
   that are not room edges (a half wall, a kitchen peninsula) and `thickness` hints where the plan
   shows them.
@@ -102,7 +118,8 @@ and rejects a reading with no usable rooms.
 The Rooms step becomes an **Outlines step**: the photo underneath, each room a translucent polygon
 with handles. Tools: drag corner, add corner (tap an edge), delete corner, draw a new room, delete a
 room, merge two rooms, door tool (tap hinge then latch), window tool (drag along a wall), fixture
-tool (pick type, drag a box), rename. Snap: a dragged corner within 12 px of a dark line in the photo
+tool (pick type, drag a box), **furniture tool** (pick a library item: it drops at its standard size,
+then drag to move, handles to turn and resize, snap to walls and to other furniture edges), rename. Snap: a dragged corner within 12 px of a dark line in the photo
 snaps to it (local line search in the image; a toggle turns it off). Orthogonal snap at 0°/90° within
 3° unless Shift is held. Undo/redo. A "Compare" slider fades between photo and clean drawing before
 approval.
@@ -112,8 +129,9 @@ approval.
 A pure function in `packages/domain` from the checked analysis to SVG, rendered to a PNG (and kept as
 SVG) at the photo's size: walls built by offsetting each room outline outwards by half the wall
 thickness and merging (outer walls 0.2 m, inner 0.1 m, from the scale); openings cut through the
-wall; door leaf and quarter arc on the swing side; windows as three thin lines; fixture symbols from
-a small built-in set; room name centred, with the floor area under it; light grey fill per room; a
+wall; door leaf and quarter arc on the swing side; windows as three thin lines; fixture and furniture symbols
+from a built-in set (plan-view symbols: bed with pillows, sofa, dining table with chairs, wardrobe
+with the diagonal cross, kitchen cabinets with the worktop line, and so on); room name centred, with the floor area under it; light grey fill per room; a
 Maxsen style sheet (colours, line weights, fonts) shared with the PDF export. Dimension lines are
 optional (off by default).
 
@@ -123,7 +141,7 @@ optional (off by default).
   level with the photo's crop and rotation, keeping `width`/`height`, so coordinates are unchanged.
   The photo file is kept and referenced as `underlay` on the plans.
 - The home package builder adds `level.rooms` (polygons, walls, openings converted to plan units;
-  `scale` in metres per unit; `wallHeight` default 2.6) and embeds the clean drawing as the level's
+  `scale` in metres per unit; `wallHeight` default 2.6) and `level.furniture` and embeds the clean drawing as the level's
   image. Home Assistant's "Refresh from planner" then shows the clean plan with every device where it
   was; the 3D option appears for that level.
 - The PDF export uses the clean background automatically (it draws whatever the plan's background
@@ -180,5 +198,8 @@ optional (off by default).
 - The snap-to-line search (window size, line scoring), the polygon editor's hit areas on touch.
 - The fixture symbol set's drawings and the exact style tokens, within "Maxsen style": calm, thin
   dark lines on white, light grey room fills, the planner's existing fonts.
-- The largest-rectangle derivation for Magic Plan.
+- The largest-rectangle derivation for Magic Plan, and how Magic Plan's bed/sofa/TV rules read the
+  placed furniture (a placed item wins over the guess; the guess fills in when nothing is placed).
+- The furniture library's exact list and default sizes (start from the list in goal 2 and common
+  Singapore sizes), and the symbol drawings.
 - Prompt wording for the vision reading.

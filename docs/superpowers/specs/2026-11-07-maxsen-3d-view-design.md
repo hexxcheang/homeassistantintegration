@@ -88,6 +88,33 @@ level.rooms: {
 - A level without a rooms layer has no 3D; the layer toggle shows only the 2D options for it.
 - Schema version stays 1: the field is optional and old packages still load.
 
+## Decisions from the builder check *(Claude's calls; the owner can override)*
+
+1. **One coordinate frame per level.** The clean-drawing project replaces a level's photo with one
+   clean drawing that both of the level's plans (Smart Home and Lighting) share, so the rooms layer
+   sits on the level and uses that drawing's plan units. Guard: the 3D option is offered only when
+   the level's plans share a background key; otherwise the layer toggle stays 2D-only, as "All"
+   does today.
+2. **Build order and test data.** The clean-drawing project is designed next and built first; the
+   3D's real-HA test then uses the planner's own rooms layer for the Dairy Farm home. Unit tests
+   and the preview app use a hand-written rooms layer in the test fixture. The hand-drawn Dairy Farm
+   rooms from the NeonPlan trial (16 rooms, 16 doors, 8 windows) are the fallback fixture.
+3. **Mounting height and wall, by category, with optional overrides.** The package carries only 2D
+   positions, so the 3D derives placement:
+   - downlights, motion sensors, ceiling fans: on the ceiling plane;
+   - LED strips: at cove height (ceiling minus 0.3 m) along their path;
+   - switches and control panels: 1.2 m up on the nearest wall within 0.4 m (in metres via
+     `scale`), kept on the **same side of the wall as the marker**, so a switch by a doorway never
+     jumps to the neighbouring room;
+   - curtains: on the nearest wall along their drawn line, full height;
+   - aircon: 2.1 m up on the nearest wall; door sensors: 2.0 m on the nearest wall; cameras and
+     locks: 1.5 m on the nearest wall;
+   - anything farther than 0.4 m from a wall stays at its planned x/y at its category height,
+     free-standing.
+   The rooms layer may carry optional per-element overrides, `mounts: { [elementId]: { height?,
+   wall?: [from, to] } }`, for the planner to fill in later; the 3D uses them when present.
+4. **Dark look:** see the open question below; the doc is updated once the owner answers.
+
 ## The look (within the NeonPlan style)
 
 - Background: very dark navy. Floors: dark slabs with a faint tint per room; the room name floats

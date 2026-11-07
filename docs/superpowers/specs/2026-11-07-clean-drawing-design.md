@@ -1,7 +1,7 @@
 # Maxsen Planner: Clean drawing from site photos — Design
 
 Date: 2026-11-07
-Status: Draft, awaiting owner approval
+Status: Draft, awaiting owner approval (builder check done 2026-11-07)
 Repos: `hexxcheang/maxsen-planner` (the work), `hexxcheang/homeassistantintegration` (consumes the
 result). Feeds: `2026-11-07-maxsen-3d-view-design.md` (needs the rooms layer defined here).
 
@@ -135,6 +135,35 @@ optional (off by default).
 - Magic Plan reads `rooms[].x/y/w/h` and `parts`, derived from the outline (largest inscribed
   rectangle plus the remaining parts); its tests get fixtures with outlines to prove the derivation.
 - The home package schema version stays 1; `rooms` and `underlay` are optional.
+
+## Decisions from the builder check *(Claude's calls; the owner can override)*
+
+1. **One geometry for the package: wall centrelines.** The vision reading and the editor work with
+   inside-face outlines (what a person sees on the photo). The planner's package builder turns them
+   into what Home Assistant gets: `rooms[].polygon` on the **wall centrelines**, so neighbouring
+   rooms really share edges, and `walls[]` listing **every** wall segment with its thickness (outer
+   0.2 m, inner 0.1 m, or the plan's hint). The 3D draws slabs from the polygons and walls from
+   `walls[]`; it never derives walls itself. (The 3D design is updated to say so.) Reconciling
+   neighbours (edges within a wall thickness of each other become one shared edge) is a builder
+   step in the planner with its own tests. The photo is **not** carried to Home Assistant: no
+   `underlay` in the package.
+2. **Only when both plans of a level share a background.** The clean drawing is offered for a level
+   only when its Smart Home and Lighting plans have the same background key (same page, crop and
+   rotation). Otherwise the planner says "Give both plans the same drawing in Setup first" and
+   offers the shortcut that exists there. Outlines are stored once per level, tied to that
+   background key. This matches the 3D design's decision 1 and Home Assistant's existing guard.
+3. **"Approve drawing" is its own action.** The outline editor is shared: it is step 1 of Magic
+   Plan as today, and it has an **Approve drawing** button that generates and sets the clean
+   background. Running Magic Plan never changes a background. Existing projects' box layouts become
+   4-point polygons (extra parts merged in) and can be corrected and approved without a new vision
+   reading; the "find rooms for me" path and the built-in samples work the same way. The old box
+   editor is replaced, not kept.
+4. **Changing the page, crop or rotation after approval is blocked; "Back to the photo" is
+   supported.** A plan with a clean drawing marks its background as derived from the photo. Setup
+   greys out crop and rotation for it with "Go back to the photo first". *Back to the photo*
+   restores the photo as the background, keeps outlines and devices (same frame), and the next
+   "Refresh from planner" in Home Assistant drops the rooms layer, so the 3D option disappears for
+   that level until the drawing is approved again.
 
 ## Approaches considered
 

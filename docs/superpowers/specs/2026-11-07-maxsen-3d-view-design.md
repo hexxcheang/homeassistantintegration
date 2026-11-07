@@ -85,6 +85,10 @@ level.rooms: {
 
 - Coordinates are in the same plan units as the scene (so device positions line up without a
   second mapping).
+- `rooms[].polygon` runs along the **wall centrelines** (neighbours share edges) and `walls[]`
+  lists **every** wall segment with its thickness; the planner's package builder produces both from
+  the inside-face outlines staff checked (clean-drawing design, decision 1). The 3D draws floor
+  slabs from the polygons and walls only from `walls[]`; it never derives walls itself.
 - A level without a rooms layer has no 3D; the layer toggle shows only the 2D options for it.
 - Schema version stays 1: the field is optional and old packages still load.
 

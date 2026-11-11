@@ -79,8 +79,9 @@ The home package (`maxsen-home`, schema 1) gains an optional **rooms layer** per
 the clean-drawing project. This design fixes its shape so that project knows what to deliver:
 
 ```
-level.furniture: [{ id, type, roomId, x, y, rotation, width, depth, height, builtIn }]
-  // x, y and rotation in plan units/degrees; sizes in metres; builtIn marks carpentry
+level.furniture: [{ id, type, roomId, x, y, rotation, width, depth, height, builtIn, label? }]
+  // x, y: centre in plan units; rotation 0 | 90 | 180 | 270 (which side is its back); sizes in metres;
+  // type is the planner's furniture kind (bed, sofa, tv, wardrobe, kitchen-counter, wc, …); builtIn marks carpentry
 level.rooms: {
   scale: number,                 // metres per plan unit (plan units are the scene's 1000-wide space)
   wallHeight?: number,           // metres, default 2.6

@@ -183,6 +183,25 @@ optional (off by default).
    "Refresh from planner" in Home Assistant drops the rooms layer, so the 3D option disappears for
    that level until the drawing is approved again.
 
+## Update 2026-11-11: what planner `main` already has
+
+Between the design and the build, other work landed on planner `main` (32a8688): Claude's reading
+already returns **doors** (hinge, latch, swing, sliding/folding/double) and **furniture** (boxes with
+a kind, the side against a wall, and a label), the Rooms step shows and removes them, and **Magic
+Plan already follows the furniture**. The build therefore:
+
+- keeps that furniture model (axis-aligned boxes; "which side is the back" instead of a free
+  rotation) and adds the missing kinds (WC, basin, bedside table, shoe cabinet, bay-window seat,
+  kitchen wall cabinets, study table, platform bed, shelter shelving), standard sizes and plan
+  symbols, plus adding, moving, turning and resizing pieces by hand;
+- keeps today's door taps and the doors Claude read; no new door tool;
+- does not redo "Magic Plan uses the furniture";
+- stores the outline in the existing per-plan layout, written to both plans of a level when they
+  share a background, instead of a new field on the level;
+- takes the scale from a measured wall when the plan has one, else from the floor area.
+
+The plan is `docs/superpowers/plans/2026-11-11-clean-drawing.md`.
+
 ## Approaches considered
 
 1. **Vision reads real outlines, staff correct with snap-to-line.** Chosen. Builds on the reading

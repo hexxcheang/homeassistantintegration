@@ -1,7 +1,7 @@
 # Maxsen Planner: Clean drawing from site photos — Design
 
 Date: 2026-11-07
-Status: Draft, awaiting owner approval (builder check done 2026-11-07)
+Status: Approved 2026-11-11 (owner: "go build the clean drawing now")
 Repos: `hexxcheang/maxsen-planner` (the work), `hexxcheang/homeassistantintegration` (consumes the
 result). Feeds: `2026-11-07-maxsen-3d-view-design.md` (needs the rooms layer defined here).
 

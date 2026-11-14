@@ -37,6 +37,14 @@ def test_valid_fixture_parses(home_package):
     assert set(pkg["images"]) == {"file-l1", "file-l2"}
 
 
+def test_package_with_rooms_and_furniture_parses_unchanged(home_rooms_package):
+    pkg = parse_package(to_raw(home_rooms_package))
+    level = pkg["levels"][0]
+    assert [r["id"] for r in level["rooms"]["rooms"]] == ["room-living", "room-bedroom"]
+    assert {f["type"] for f in level["furniture"]} == {"wardrobe", "bed"}
+    assert pkg == home_rooms_package
+
+
 def test_invalid_json():
     assert reason_of(b"{") == "invalid_json"
 

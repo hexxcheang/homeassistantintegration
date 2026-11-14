@@ -16,3 +16,9 @@ contract exactly.
 Regenerate it whenever the planner's home package contract changes (a throwaway script that
 builds a `HomeSource`, calls `buildHomePackage` and writes the JSON with the images added);
 then update the tests that reference its ids.
+
+`home-v1-rooms.json` is the same kind of package for a level whose clean drawing is approved: the
+level carries `rooms` (two rooms sharing a wall, a door, a window) and `furniture` (a wardrobe and
+a bed). It was produced by the planner's `buildHomePackage` (planner commit `10cb27b`) from a
+one-level project whose two plans share a clean drawing (a 1x1 PNG attached under `file-clean`),
+a 12 m measured scale and a magic layout; two devices (a switch and a door sensor) are on it.

@@ -30,3 +30,9 @@ def isolated_config_dir(request, tmp_path):
 def home_package() -> dict:
     """A fresh copy of the small valid home package (2 levels, 2 images)."""
     return json.loads((FIXTURES / "home-v1.json").read_text())
+
+
+@pytest.fixture
+def home_rooms_package() -> dict:
+    """A fresh copy of the package with an approved level: rooms, walls, openings, furniture."""
+    return json.loads((FIXTURES / "home-v1-rooms.json").read_text())

@@ -1,0 +1,419 @@
+{
+  "format": "maxsen-home",
+  "schemaVersion": 1,
+  "project": {
+    "id": "proj-test-house",
+    "title": "Test House"
+  },
+  "exportedAt": "2026-11-01T00:00:00.000Z",
+  "savedVersion": 1,
+  "levels": [
+    {
+      "id": "lvl-1",
+      "name": "Level 1",
+      "sortOrder": 1,
+      "plans": [
+        {
+          "id": "plan-sh",
+          "type": "smart-home",
+          "revision": 1,
+          "width": 1000,
+          "height": 750,
+          "background": {
+            "imageId": "file-clean",
+            "key": "page-1|0|0,0,1,1"
+          },
+          "scene": {
+            "width": 1000,
+            "height": 750,
+            "items": [
+              {
+                "type": "marker",
+                "elementId": "sw1",
+                "z": 1,
+                "categoryId": "smart-switches",
+                "shape": "square",
+                "x": 480,
+                "y": 400,
+                "rotation": 0,
+                "size": 10,
+                "color": "#2F5FB3",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "SW",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 4.2
+                },
+                "pathD": "M-0.5 -0.5 H0.5 V0.5 H-0.5 Z",
+                "label": {
+                  "text": "Door switch",
+                  "x": 480,
+                  "y": 408.5,
+                  "fontSize": 5
+                }
+              },
+              {
+                "type": "marker",
+                "elementId": "sen1",
+                "z": 2,
+                "categoryId": "sensors",
+                "shape": "target",
+                "x": 700,
+                "y": 300,
+                "rotation": 0,
+                "size": 10,
+                "color": "#AD5813",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "SE",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 3.57
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z M0 -0.42 A0.42 0.42 0 1 0 0 0.42 A0.42 0.42 0 1 0 0 -0.42 Z M0 -0.34 A0.34 0.34 0 1 1 0 0.34 A0.34 0.34 0 1 1 0 -0.34 Z"
+              }
+            ],
+            "legend": [
+              {
+                "categoryId": "smart-switches",
+                "name": "Smart Switches",
+                "shape": "square",
+                "color": "#2F5FB3",
+                "badge": "SW",
+                "badgeStyle": "filled",
+                "kind": "point"
+              },
+              {
+                "categoryId": "sensors",
+                "name": "Sensors",
+                "shape": "target",
+                "color": "#AD5813",
+                "badge": "SE",
+                "badgeStyle": "filled",
+                "kind": "point"
+              }
+            ]
+          },
+          "elements": [
+            {
+              "id": "sw1",
+              "categoryId": "smart-switches",
+              "kind": "point",
+              "productName": "Nova+ Pro",
+              "variantName": "Black",
+              "label": "Door switch",
+              "drawn": true
+            },
+            {
+              "id": "sen1",
+              "categoryId": "sensors",
+              "kind": "point",
+              "productName": "Door/Window Sensor",
+              "variantName": "Standard",
+              "label": "",
+              "drawn": true
+            }
+          ]
+        },
+        {
+          "id": "plan-lt",
+          "type": "lighting",
+          "revision": 1,
+          "width": 1000,
+          "height": 750,
+          "background": {
+            "imageId": "file-clean",
+            "key": "page-1|0|0,0,1,1"
+          },
+          "scene": {
+            "width": 1000,
+            "height": 750,
+            "items": [
+              {
+                "type": "marker",
+                "elementId": "sw1",
+                "z": 1,
+                "categoryId": "smart-switches",
+                "shape": "square",
+                "x": 480,
+                "y": 400,
+                "rotation": 0,
+                "size": 10,
+                "color": "#2F5FB3",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "SW",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 4.2
+                },
+                "pathD": "M-0.5 -0.5 H0.5 V0.5 H-0.5 Z",
+                "label": {
+                  "text": "Door switch",
+                  "x": 480,
+                  "y": 408.5,
+                  "fontSize": 5
+                }
+              },
+              {
+                "type": "marker",
+                "elementId": "sen1",
+                "z": 2,
+                "categoryId": "sensors",
+                "shape": "target",
+                "x": 700,
+                "y": 300,
+                "rotation": 0,
+                "size": 10,
+                "color": "#AD5813",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "SE",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 3.57
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z M0 -0.42 A0.42 0.42 0 1 0 0 0.42 A0.42 0.42 0 1 0 0 -0.42 Z M0 -0.34 A0.34 0.34 0 1 1 0 0.34 A0.34 0.34 0 1 1 0 -0.34 Z"
+              }
+            ],
+            "legend": [
+              {
+                "categoryId": "smart-switches",
+                "name": "Smart Switches",
+                "shape": "square",
+                "color": "#2F5FB3",
+                "badge": "SW",
+                "badgeStyle": "filled",
+                "kind": "point"
+              },
+              {
+                "categoryId": "sensors",
+                "name": "Sensors",
+                "shape": "target",
+                "color": "#AD5813",
+                "badge": "SE",
+                "badgeStyle": "filled",
+                "kind": "point"
+              }
+            ]
+          },
+          "elements": [
+            {
+              "id": "sw1",
+              "categoryId": "smart-switches",
+              "kind": "point",
+              "productName": "Nova+ Pro",
+              "variantName": "Black",
+              "label": "Door switch",
+              "drawn": true
+            },
+            {
+              "id": "sen1",
+              "categoryId": "sensors",
+              "kind": "point",
+              "productName": "Door/Window Sensor",
+              "variantName": "Standard",
+              "label": "",
+              "drawn": true
+            }
+          ]
+        }
+      ],
+      "rooms": {
+        "scale": 0.012,
+        "wallHeight": 2.6,
+        "rooms": [
+          {
+            "id": "room-living",
+            "name": "Living",
+            "polygon": [
+              [
+                91.667,
+                141.667
+              ],
+              [
+                500,
+                141.667
+              ],
+              [
+                500,
+                608.333
+              ],
+              [
+                91.667,
+                608.333
+              ]
+            ]
+          },
+          {
+            "id": "room-bedroom",
+            "name": "Bedroom",
+            "polygon": [
+              [
+                500,
+                141.667
+              ],
+              [
+                908.333,
+                141.667
+              ],
+              [
+                908.333,
+                608.333
+              ],
+              [
+                500,
+                608.333
+              ]
+            ]
+          }
+        ],
+        "walls": [
+          {
+            "from": [
+              100,
+              141.667
+            ],
+            "to": [
+              504.2,
+              141.667
+            ],
+            "thickness": 0.2
+          },
+          {
+            "from": [
+              500,
+              150
+            ],
+            "to": [
+              500,
+              600
+            ],
+            "thickness": 0.10079999999999956
+          },
+          {
+            "from": [
+              504.2,
+              608.333
+            ],
+            "to": [
+              83.333,
+              608.333
+            ],
+            "thickness": 0.2
+          },
+          {
+            "from": [
+              91.667,
+              600
+            ],
+            "to": [
+              91.667,
+              133.333
+            ],
+            "thickness": 0.2
+          },
+          {
+            "from": [
+              504.2,
+              141.667
+            ],
+            "to": [
+              916.667,
+              141.667
+            ],
+            "thickness": 0.2
+          },
+          {
+            "from": [
+              908.333,
+              150
+            ],
+            "to": [
+              908.333,
+              616.667
+            ],
+            "thickness": 0.2
+          },
+          {
+            "from": [
+              900,
+              608.333
+            ],
+            "to": [
+              504.2,
+              608.333
+            ],
+            "thickness": 0.2
+          }
+        ],
+        "openings": [
+          {
+            "type": "door",
+            "from": [
+              500,
+              339.583
+            ],
+            "to": [
+              500,
+              410.417
+            ],
+            "sill": 0,
+            "height": 2.1
+          },
+          {
+            "type": "window",
+            "from": [
+              100,
+              141.667
+            ],
+            "to": [
+              200,
+              141.667
+            ],
+            "sill": 0.9,
+            "height": 1.2
+          }
+        ]
+      },
+      "furniture": [
+        {
+          "id": "wardrobe1",
+          "type": "wardrobe",
+          "roomId": "room-bedroom",
+          "x": 855,
+          "y": 281.25,
+          "rotation": 90,
+          "width": 1.35,
+          "depth": 0.84,
+          "height": 2.4,
+          "builtIn": true
+        },
+        {
+          "id": "bed1",
+          "type": "bed",
+          "roomId": "room-bedroom",
+          "x": 650,
+          "y": 450,
+          "rotation": 0,
+          "width": 1.2,
+          "depth": 1.8,
+          "height": 0.5,
+          "builtIn": false,
+          "label": "Master bed"
+        }
+      ]
+    }
+  ],
+  "images": {
+    "file-clean": {
+      "mediaType": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    }
+  }
+}

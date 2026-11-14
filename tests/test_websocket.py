@@ -65,6 +65,23 @@ async def test_home_returns_the_package_without_image_data(
     }
 
 
+async def test_home_returns_rooms_and_furniture_unchanged(
+    hass, hass_ws_client, home_rooms_package
+):
+    entry = await setup_entry(hass, home_rooms_package)
+    ws = await hass_ws_client()
+    resp = await call(ws, "maxsen/home", entry_id=entry.entry_id)
+
+    assert resp["success"]
+    # The store drops the image data and notes each image's type; nothing else changes.
+    sent = {k: v for k, v in home_rooms_package.items() if k != "images"}
+    stored = {k: v for k, v in resp["result"]["package"].items() if k != "image_types"}
+    assert stored == sent
+    level = resp["result"]["package"]["levels"][0]
+    assert level["rooms"] == home_rooms_package["levels"][0]["rooms"]
+    assert level["furniture"] == home_rooms_package["levels"][0]["furniture"]
+
+
 async def test_home_is_readable_by_a_non_admin(
     hass, hass_ws_client, hass_read_only_access_token, entry
 ):

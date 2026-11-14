@@ -198,6 +198,43 @@ export interface HomeLevel {
   name: string;
   sortOrder: number;
   plans: HomePlan[];
+  /** Only for a level whose clean drawing is approved; plan units of that drawing. */
+  rooms?: HomeRooms;
+  furniture?: HomeFurniture[];
+}
+
+/** Rooms, walls and openings of a level; points are plan units, thicknesses and heights metres. */
+export interface HomeRooms {
+  /** Metres per plan unit. */
+  scale: number;
+  wallHeight: number;
+  /** Polygons run along the wall centrelines, so neighbours share edges. */
+  rooms: { id: string; name: string; polygon: [number, number][] }[];
+  walls: { from: [number, number]; to: [number, number]; thickness: number }[];
+  openings: {
+    type: 'door' | 'window';
+    from: [number, number];
+    to: [number, number];
+    sill?: number;
+    height?: number;
+  }[];
+}
+
+/** A piece of furniture: `x, y` is its centre in plan units, sizes are metres. */
+export interface HomeFurniture {
+  id: string;
+  /** The planner's furniture kind (bed, sofa, wardrobe, kitchen-counter, wc, ...). */
+  type: string;
+  roomId: string | null;
+  x: number;
+  y: number;
+  /** Which side its back is on: top 0, right 90, bottom 180, left 270. */
+  rotation: 0 | 90 | 180 | 270;
+  width: number;
+  depth: number;
+  height: number;
+  builtIn: boolean;
+  label?: string;
 }
 
 /** The package as the planner sends it. The card never sees this: images are stripped on save. */

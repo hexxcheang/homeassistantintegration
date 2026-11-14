@@ -290,7 +290,8 @@ dependencies changed.
   that drawing instead of the sample home. A file that is not a Maxsen home file (or is from a
   newer planner) gets a plain-language message and nothing changes. A home opened this way behaves
   like one set up from a file in Home Assistant: the refresh tool asks for a newer file instead of
-  asking the planner.
+  asking the planner. If a level's clean drawing was approved in the planner, the home file carries
+  that drawing, so the preview shows the clean plan with the devices on it instead of the site photo.
 - **Planner update file…**: pretend the planner now holds this other version of the home. Use it
   with **Refresh from planner** (below) to see what a refresh adds, removes and redraws. It applies
   to the sample home, which plays a home paired with the planner.

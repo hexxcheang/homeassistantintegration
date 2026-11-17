@@ -22,3 +22,13 @@ level carries `rooms` (two rooms sharing a wall, a door, a window) and `furnitur
 a bed). It was produced by the planner's `buildHomePackage` (planner commit `10cb27b`) from a
 one-level project whose two plans share a clean drawing (a 1x1 PNG attached under `file-clean`),
 a 12 m measured scale and a magic layout; two devices (a switch and a door sensor) are on it.
+
+`home-v1-3d.json` is invented sample data for the 3D view, not a customer's plan and not planner
+output. It starts as a copy of `home-v1.json` (same background, ids and first-level plans) and a
+generator script then added to level 1: a rooms layer (five rooms that share edges, scale 0.012 so
+the drawing is about 12 m wide, wall height 2.6, eight walls, five doors and two windows) and eight
+furniture items (bed, wardrobe, sofa, tv, dining-table, kitchen-counter, wc, desk). Devices were
+added so the level has 6 downlights, 1 LED strip, 2 curtains, 2 switches, 1 control panel,
+1 motion sensor, 1 door sensor, 1 aircon controller and 1 ceiling fan. The marker shapes and colours
+of the added categories follow the existing ones by hand and were not produced by `buildHomePackage`.
+Level 2 is unchanged.

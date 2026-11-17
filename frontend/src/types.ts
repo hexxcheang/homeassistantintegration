@@ -212,7 +212,8 @@ export interface HomeRooms {
   /** Per element id: where a device sits when the default placement is wrong. Heights are metres. */
   mounts?: Record<string, { height?: number; wall?: [[number, number], [number, number]] }>;
   /** Polygons run along the wall centrelines, so neighbours share edges. */
-  rooms: { id: string; name: string; polygon: [number, number][] }[];
+  /** `partOf` names another room of the level when this entry is one more area of that room. */
+  rooms: { id: string; name: string; polygon: [number, number][]; partOf?: string }[];
   walls: { from: [number, number]; to: [number, number]; thickness: number }[];
   openings: {
     type: 'door' | 'window';

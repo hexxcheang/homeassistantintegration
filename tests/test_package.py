@@ -46,6 +46,17 @@ def test_package_with_rooms_and_furniture_parses_unchanged(home_rooms_package):
     assert pkg == home_rooms_package
 
 
+def test_3d_sample_house_parses_unchanged(home_3d_package):
+    """The 3D sample passes the server's rooms-layer check: nothing is dropped."""
+    pkg = parse_package(to_raw(home_3d_package))
+    level = pkg["levels"][0]
+    assert [r["id"] for r in level["rooms"]["rooms"]] == [
+        "room-living", "room-kitchen", "room-bedroom", "room-bath", "room-study",
+    ]
+    assert len(level["furniture"]) == 8
+    assert pkg == home_3d_package
+
+
 def _set(path_and_value):
     """Return a mutator that sets one value inside level 1 of the rooms package."""
     path, value = path_and_value

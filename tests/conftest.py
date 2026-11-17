@@ -36,3 +36,9 @@ def home_package() -> dict:
 def home_rooms_package() -> dict:
     """A fresh copy of the package with an approved level: rooms, walls, openings, furniture."""
     return json.loads((FIXTURES / "home-v1-rooms.json").read_text())
+
+
+@pytest.fixture
+def home_3d_package() -> dict:
+    """A fresh copy of the sample house for 3D: five rooms, walls, openings, furniture and devices."""
+    return json.loads((FIXTURES / "home-v1-3d.json").read_text())

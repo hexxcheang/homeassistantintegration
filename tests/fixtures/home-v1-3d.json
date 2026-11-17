@@ -1,0 +1,1153 @@
+{
+  "format": "maxsen-home",
+  "schemaVersion": 1,
+  "project": {
+    "id": "proj-test-house",
+    "title": "Test House"
+  },
+  "exportedAt": "2026-11-01T08:00:00.000Z",
+  "savedVersion": 3,
+  "levels": [
+    {
+      "id": "level-1",
+      "name": "Level 1",
+      "sortOrder": 1,
+      "plans": [
+        {
+          "id": "plan-1-sh",
+          "type": "smart-home",
+          "revision": 4,
+          "width": 1000,
+          "height": 1000,
+          "background": {
+            "imageId": "file-l1",
+            "key": "page-1|0|0,0,1,1"
+          },
+          "scene": {
+            "width": 1000,
+            "height": 1000,
+            "items": [
+              {
+                "type": "marker",
+                "elementId": "sw1",
+                "z": 1,
+                "categoryId": "smart-switches",
+                "shape": "square",
+                "x": 180,
+                "y": 220,
+                "rotation": 0,
+                "size": 20,
+                "color": "#2F5FB3",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "SW",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M-0.5 -0.5 H0.5 V0.5 H-0.5 Z",
+                "label": {
+                  "text": "Entrance switch",
+                  "x": 180,
+                  "y": 237,
+                  "fontSize": 10
+                }
+              },
+              {
+                "type": "marker",
+                "elementId": "sen1",
+                "z": 2,
+                "categoryId": "sensors",
+                "shape": "target",
+                "x": 420,
+                "y": 150,
+                "rotation": 0,
+                "size": 20,
+                "color": "#AD5813",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "SE",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 7.14
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z M0 -0.42 A0.42 0.42 0 1 0 0 0.42 A0.42 0.42 0 1 0 0 -0.42 Z M0 -0.34 A0.34 0.34 0 1 1 0 0.34 A0.34 0.34 0 1 1 0 -0.34 Z"
+              },
+              {
+                "type": "path",
+                "elementId": "cur1",
+                "z": 3,
+                "categoryId": "curtains-blinds",
+                "kind": "curtain",
+                "shape": "curtain",
+                "d": "M600 80 L860 80",
+                "points": [
+                  {
+                    "x": 600,
+                    "y": 80
+                  },
+                  {
+                    "x": 860,
+                    "y": 80
+                  }
+                ],
+                "closed": false,
+                "smooth": false,
+                "strokeWidth": 6.6000000000000005,
+                "color": "#177A68",
+                "dash": [
+                  0.001,
+                  12.540000000000001
+                ],
+                "heads": [],
+                "label": {
+                  "text": "S. Curtains",
+                  "x": 730,
+                  "y": 80,
+                  "fontSize": 10
+                }
+              },
+              {
+                "type": "note",
+                "elementId": "note1",
+                "z": 4,
+                "x": 500,
+                "y": 420,
+                "text": "Hub goes in the DB closet",
+                "fontSize": 16,
+                "bold": false,
+                "color": "#000000",
+                "highlight": null
+              },
+              {
+                "type": "marker",
+                "elementId": "sw2",
+                "z": 5,
+                "categoryId": "smart-switches",
+                "shape": "square",
+                "x": 520,
+                "y": 250,
+                "rotation": 0,
+                "size": 20,
+                "color": "#2F5FB3",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "SW",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M-0.5 -0.5 H0.5 V0.5 H-0.5 Z",
+                "label": {
+                  "text": "Kitchen switch",
+                  "x": 520,
+                  "y": 267,
+                  "fontSize": 10
+                }
+              },
+              {
+                "type": "marker",
+                "elementId": "panel1",
+                "z": 6,
+                "categoryId": "control-panels",
+                "shape": "panel",
+                "x": 140,
+                "y": 300,
+                "rotation": 0,
+                "size": 20,
+                "color": "#5B3FA8",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "CP",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M-0.5 -0.5 H0.5 V0.5 H-0.5 Z",
+                "label": {
+                  "text": "Living panel",
+                  "x": 140,
+                  "y": 317,
+                  "fontSize": 10
+                }
+              },
+              {
+                "type": "marker",
+                "elementId": "mot1",
+                "z": 7,
+                "categoryId": "sensors",
+                "shape": "target",
+                "x": 300,
+                "y": 330,
+                "rotation": 0,
+                "size": 20,
+                "color": "#AD5813",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "SE",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z"
+              },
+              {
+                "type": "marker",
+                "elementId": "ac1",
+                "z": 8,
+                "categoryId": "aircon-controllers",
+                "shape": "pill",
+                "x": 200,
+                "y": 480,
+                "rotation": 0,
+                "size": 20,
+                "color": "#0F7C90",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "AC",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M-0.5 -0.5 H0.5 V0.5 H-0.5 Z"
+              },
+              {
+                "type": "path",
+                "elementId": "cur2",
+                "z": 9,
+                "categoryId": "curtains-blinds",
+                "kind": "curtain",
+                "shape": "curtain",
+                "d": "M150 790 L300 790",
+                "points": [
+                  {
+                    "x": 150,
+                    "y": 790
+                  },
+                  {
+                    "x": 300,
+                    "y": 790
+                  }
+                ],
+                "closed": false,
+                "smooth": false,
+                "strokeWidth": 6.6000000000000005,
+                "color": "#177A68",
+                "dash": [
+                  0.001,
+                  12.540000000000001
+                ],
+                "heads": [],
+                "label": {
+                  "text": "Bed curtains",
+                  "x": 225,
+                  "y": 790,
+                  "fontSize": 10
+                }
+              }
+            ],
+            "legend": [
+              {
+                "categoryId": "smart-switches",
+                "name": "Smart Switches",
+                "shape": "square",
+                "color": "#2F5FB3",
+                "badge": "SW",
+                "badgeStyle": "filled",
+                "kind": "point"
+              },
+              {
+                "categoryId": "curtains-blinds",
+                "name": "Curtains / Blinds",
+                "shape": "curtain",
+                "color": "#177A68",
+                "badge": "CB",
+                "badgeStyle": "filled",
+                "kind": "curtain"
+              },
+              {
+                "categoryId": "sensors",
+                "name": "Sensors",
+                "shape": "target",
+                "color": "#AD5813",
+                "badge": "SE",
+                "badgeStyle": "filled",
+                "kind": "point"
+              },
+              {
+                "categoryId": "control-panels",
+                "name": "Control Panels",
+                "shape": "panel",
+                "color": "#5B3FA8",
+                "badge": "CP",
+                "badgeStyle": "filled",
+                "kind": "point"
+              },
+              {
+                "categoryId": "aircon-controllers",
+                "name": "Aircon Controllers",
+                "shape": "pill",
+                "color": "#0F7C90",
+                "badge": "AC",
+                "badgeStyle": "filled",
+                "kind": "point"
+              }
+            ]
+          },
+          "elements": [
+            {
+              "id": "sw1",
+              "categoryId": "smart-switches",
+              "kind": "point",
+              "productName": "Ark Series",
+              "variantName": "3-gang, White",
+              "label": "Entrance switch",
+              "drawn": true
+            },
+            {
+              "id": "sen1",
+              "categoryId": "sensors",
+              "kind": "point",
+              "productName": "Door/Window Sensor",
+              "variantName": "Standard",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "cur1",
+              "categoryId": "curtains-blinds",
+              "kind": "curtain",
+              "productName": "Smart Curtain Track",
+              "variantName": "Single",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "sw2",
+              "categoryId": "smart-switches",
+              "kind": "point",
+              "productName": "Ark Series",
+              "variantName": "2-gang, White",
+              "label": "Kitchen switch",
+              "drawn": true
+            },
+            {
+              "id": "panel1",
+              "categoryId": "control-panels",
+              "kind": "point",
+              "productName": "Control Panel 4in",
+              "variantName": "Black",
+              "label": "Living panel",
+              "drawn": true
+            },
+            {
+              "id": "mot1",
+              "categoryId": "sensors",
+              "kind": "point",
+              "productName": "Motion Sensor",
+              "variantName": "Standard",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "ac1",
+              "categoryId": "aircon-controllers",
+              "kind": "point",
+              "productName": "Aircon Controller",
+              "variantName": "Standard",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "cur2",
+              "categoryId": "curtains-blinds",
+              "kind": "curtain",
+              "productName": "Smart Curtain Track",
+              "variantName": "Single",
+              "label": "Bed curtains",
+              "drawn": true
+            }
+          ]
+        },
+        {
+          "id": "plan-1-lt",
+          "type": "lighting",
+          "revision": 2,
+          "width": 1000,
+          "height": 1000,
+          "background": {
+            "imageId": "file-l1",
+            "key": "page-1|0|0,0,1,1"
+          },
+          "scene": {
+            "width": 1000,
+            "height": 1000,
+            "items": [
+              {
+                "type": "marker",
+                "elementId": "dl1",
+                "z": 1,
+                "categoryId": "downlights",
+                "shape": "circle",
+                "x": 300,
+                "y": 500,
+                "rotation": 0,
+                "size": 20,
+                "color": "#D28A00",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "DL",
+                  "color": "#1F1D1A",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z"
+              },
+              {
+                "type": "marker",
+                "elementId": "dl2",
+                "z": 2,
+                "categoryId": "downlights",
+                "shape": "circle",
+                "x": 500,
+                "y": 500,
+                "rotation": 0,
+                "size": 20,
+                "color": "#D28A00",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "DL",
+                  "color": "#1F1D1A",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z"
+              },
+              {
+                "type": "marker",
+                "elementId": "dl3",
+                "z": 3,
+                "categoryId": "downlights",
+                "shape": "circle",
+                "x": 700,
+                "y": 500,
+                "rotation": 0,
+                "size": 20,
+                "color": "#D28A00",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "DL",
+                  "color": "#1F1D1A",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z"
+              },
+              {
+                "type": "path",
+                "elementId": "led1",
+                "z": 4,
+                "categoryId": "led-strips",
+                "kind": "led-strip",
+                "shape": "strip",
+                "d": "M250 700 L750 700",
+                "points": [
+                  {
+                    "x": 250,
+                    "y": 700
+                  },
+                  {
+                    "x": 750,
+                    "y": 700
+                  }
+                ],
+                "closed": false,
+                "smooth": false,
+                "strokeWidth": 6,
+                "color": "#C99700",
+                "heads": [],
+                "label": {
+                  "text": "3.5m LED Strip",
+                  "x": 500,
+                  "y": 700,
+                  "fontSize": 10
+                }
+              },
+              {
+                "type": "marker",
+                "elementId": "dl4",
+                "z": 5,
+                "categoryId": "downlights",
+                "shape": "circle",
+                "x": 250,
+                "y": 250,
+                "rotation": 0,
+                "size": 20,
+                "color": "#D28A00",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "DL",
+                  "color": "#1F1D1A",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z"
+              },
+              {
+                "type": "marker",
+                "elementId": "dl5",
+                "z": 6,
+                "categoryId": "downlights",
+                "shape": "circle",
+                "x": 700,
+                "y": 250,
+                "rotation": 0,
+                "size": 20,
+                "color": "#D28A00",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "DL",
+                  "color": "#1F1D1A",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z"
+              },
+              {
+                "type": "marker",
+                "elementId": "dl6",
+                "z": 7,
+                "categoryId": "downlights",
+                "shape": "circle",
+                "x": 450,
+                "y": 250,
+                "rotation": 0,
+                "size": 20,
+                "color": "#D28A00",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "DL",
+                  "color": "#1F1D1A",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z"
+              },
+              {
+                "type": "marker",
+                "elementId": "fan1",
+                "z": 8,
+                "categoryId": "ceiling-fans",
+                "shape": "fan",
+                "x": 700,
+                "y": 650,
+                "rotation": 0,
+                "size": 20,
+                "color": "#6B7A1F",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "CF",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 8.4
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z"
+              }
+            ],
+            "legend": [
+              {
+                "categoryId": "downlights",
+                "name": "Downlights",
+                "shape": "circle",
+                "color": "#D28A00",
+                "badge": "DL",
+                "badgeStyle": "filled",
+                "kind": "point"
+              },
+              {
+                "categoryId": "led-strips",
+                "name": "LED Strips",
+                "shape": "strip",
+                "color": "#C99700",
+                "badge": "LED",
+                "badgeStyle": "filled",
+                "kind": "led-strip"
+              },
+              {
+                "categoryId": "ceiling-fans",
+                "name": "Ceiling Fans",
+                "shape": "fan",
+                "color": "#6B7A1F",
+                "badge": "CF",
+                "badgeStyle": "filled",
+                "kind": "point"
+              }
+            ]
+          },
+          "elements": [
+            {
+              "id": "dl1",
+              "categoryId": "downlights",
+              "kind": "point",
+              "productName": "Luna Downlight",
+              "variantName": "Smart CCT",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "dl2",
+              "categoryId": "downlights",
+              "kind": "point",
+              "productName": "Luna Downlight",
+              "variantName": "Smart CCT",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "dl3",
+              "categoryId": "downlights",
+              "kind": "point",
+              "productName": "Luna Downlight",
+              "variantName": "Smart CCT",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "led1",
+              "categoryId": "led-strips",
+              "kind": "led-strip",
+              "productName": "Lumi Cove Strip",
+              "variantName": "Smart CCT",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "dl4",
+              "categoryId": "downlights",
+              "kind": "point",
+              "productName": "Luna Downlight",
+              "variantName": "Smart CCT",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "dl5",
+              "categoryId": "downlights",
+              "kind": "point",
+              "productName": "Luna Downlight",
+              "variantName": "Smart CCT",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "dl6",
+              "categoryId": "downlights",
+              "kind": "point",
+              "productName": "Luna Downlight",
+              "variantName": "Smart CCT",
+              "label": "",
+              "drawn": true
+            },
+            {
+              "id": "fan1",
+              "categoryId": "ceiling-fans",
+              "kind": "point",
+              "productName": "Breeze Ceiling Fan",
+              "variantName": "Light kit, White",
+              "label": "",
+              "drawn": true
+            }
+          ]
+        }
+      ],
+      "rooms": {
+        "scale": 0.012,
+        "wallHeight": 2.6,
+        "rooms": [
+          {
+            "id": "room-living",
+            "name": "Living",
+            "polygon": [
+              [
+                80,
+                100
+              ],
+              [
+                500,
+                100
+              ],
+              [
+                500,
+                450
+              ],
+              [
+                80,
+                450
+              ]
+            ]
+          },
+          {
+            "id": "room-kitchen",
+            "name": "Kitchen",
+            "polygon": [
+              [
+                500,
+                100
+              ],
+              [
+                920,
+                100
+              ],
+              [
+                920,
+                450
+              ],
+              [
+                500,
+                450
+              ]
+            ]
+          },
+          {
+            "id": "room-bedroom",
+            "name": "Bedroom",
+            "polygon": [
+              [
+                80,
+                450
+              ],
+              [
+                400,
+                450
+              ],
+              [
+                400,
+                800
+              ],
+              [
+                80,
+                800
+              ]
+            ]
+          },
+          {
+            "id": "room-bath",
+            "name": "Bathroom",
+            "polygon": [
+              [
+                400,
+                450
+              ],
+              [
+                560,
+                450
+              ],
+              [
+                560,
+                800
+              ],
+              [
+                400,
+                800
+              ]
+            ]
+          },
+          {
+            "id": "room-study",
+            "name": "Study",
+            "polygon": [
+              [
+                560,
+                450
+              ],
+              [
+                920,
+                450
+              ],
+              [
+                920,
+                800
+              ],
+              [
+                560,
+                800
+              ]
+            ]
+          }
+        ],
+        "walls": [
+          {
+            "from": [
+              80,
+              100
+            ],
+            "to": [
+              920,
+              100
+            ],
+            "thickness": 0.2
+          },
+          {
+            "from": [
+              920,
+              100
+            ],
+            "to": [
+              920,
+              800
+            ],
+            "thickness": 0.2
+          },
+          {
+            "from": [
+              920,
+              800
+            ],
+            "to": [
+              80,
+              800
+            ],
+            "thickness": 0.2
+          },
+          {
+            "from": [
+              80,
+              800
+            ],
+            "to": [
+              80,
+              100
+            ],
+            "thickness": 0.2
+          },
+          {
+            "from": [
+              80,
+              450
+            ],
+            "to": [
+              920,
+              450
+            ],
+            "thickness": 0.1
+          },
+          {
+            "from": [
+              500,
+              100
+            ],
+            "to": [
+              500,
+              450
+            ],
+            "thickness": 0.1
+          },
+          {
+            "from": [
+              400,
+              450
+            ],
+            "to": [
+              400,
+              800
+            ],
+            "thickness": 0.1
+          },
+          {
+            "from": [
+              560,
+              450
+            ],
+            "to": [
+              560,
+              800
+            ],
+            "thickness": 0.1
+          }
+        ],
+        "openings": [
+          {
+            "type": "door",
+            "from": [
+              300,
+              100
+            ],
+            "to": [
+              380,
+              100
+            ],
+            "sill": 0,
+            "height": 2.1
+          },
+          {
+            "type": "door",
+            "from": [
+              500,
+              200
+            ],
+            "to": [
+              500,
+              280
+            ],
+            "sill": 0,
+            "height": 2.1
+          },
+          {
+            "type": "door",
+            "from": [
+              150,
+              450
+            ],
+            "to": [
+              230,
+              450
+            ],
+            "sill": 0,
+            "height": 2.1
+          },
+          {
+            "type": "door",
+            "from": [
+              440,
+              450
+            ],
+            "to": [
+              520,
+              450
+            ],
+            "sill": 0,
+            "height": 2.1
+          },
+          {
+            "type": "door",
+            "from": [
+              650,
+              450
+            ],
+            "to": [
+              730,
+              450
+            ],
+            "sill": 0,
+            "height": 2.1
+          },
+          {
+            "type": "window",
+            "from": [
+              150,
+              800
+            ],
+            "to": [
+              300,
+              800
+            ],
+            "sill": 0.9,
+            "height": 1.2
+          },
+          {
+            "type": "window",
+            "from": [
+              700,
+              100
+            ],
+            "to": [
+              850,
+              100
+            ],
+            "sill": 0.9,
+            "height": 1.2
+          }
+        ]
+      },
+      "furniture": [
+        {
+          "id": "bed1",
+          "type": "bed",
+          "roomId": "room-bedroom",
+          "x": 240,
+          "y": 640,
+          "rotation": 0,
+          "width": 1.6,
+          "depth": 2.0,
+          "height": 0.5,
+          "builtIn": false,
+          "label": "Master bed"
+        },
+        {
+          "id": "wardrobe1",
+          "type": "wardrobe",
+          "roomId": "room-bedroom",
+          "x": 120,
+          "y": 520,
+          "rotation": 270,
+          "width": 1.8,
+          "depth": 0.6,
+          "height": 2.2,
+          "builtIn": true
+        },
+        {
+          "id": "sofa1",
+          "type": "sofa",
+          "roomId": "room-living",
+          "x": 280,
+          "y": 380,
+          "rotation": 180,
+          "width": 2.1,
+          "depth": 0.9,
+          "height": 0.85,
+          "builtIn": false
+        },
+        {
+          "id": "tv1",
+          "type": "tv",
+          "roomId": "room-living",
+          "x": 280,
+          "y": 130,
+          "rotation": 0,
+          "width": 1.4,
+          "depth": 0.4,
+          "height": 0.8,
+          "builtIn": false
+        },
+        {
+          "id": "table1",
+          "type": "dining-table",
+          "roomId": "room-kitchen",
+          "x": 700,
+          "y": 270,
+          "rotation": 0,
+          "width": 1.6,
+          "depth": 0.9,
+          "height": 0.75,
+          "builtIn": false
+        },
+        {
+          "id": "counter1",
+          "type": "kitchen-counter",
+          "roomId": "room-kitchen",
+          "x": 880,
+          "y": 270,
+          "rotation": 90,
+          "width": 3.0,
+          "depth": 0.6,
+          "height": 0.9,
+          "builtIn": true
+        },
+        {
+          "id": "wc1",
+          "type": "wc",
+          "roomId": "room-bath",
+          "x": 480,
+          "y": 760,
+          "rotation": 180,
+          "width": 0.4,
+          "depth": 0.7,
+          "height": 0.8,
+          "builtIn": true
+        },
+        {
+          "id": "desk1",
+          "type": "desk",
+          "roomId": "room-study",
+          "x": 800,
+          "y": 520,
+          "rotation": 0,
+          "width": 1.4,
+          "depth": 0.7,
+          "height": 0.75,
+          "builtIn": false
+        }
+      ]
+    },
+    {
+      "id": "level-2",
+      "name": "Level 2",
+      "sortOrder": 2,
+      "plans": [
+        {
+          "id": "plan-2-sh",
+          "type": "smart-home",
+          "revision": 1,
+          "width": 1000,
+          "height": 750,
+          "background": {
+            "imageId": "file-l2",
+            "key": "page-2|0|0,0,1,1"
+          },
+          "scene": {
+            "width": 1000,
+            "height": 750,
+            "items": [
+              {
+                "type": "marker",
+                "elementId": "sen2",
+                "z": 1,
+                "categoryId": "sensors",
+                "shape": "target",
+                "x": 400,
+                "y": 300,
+                "rotation": 0,
+                "size": 20,
+                "color": "#AD5813",
+                "badgeStyle": "filled",
+                "badge": {
+                  "text": "SE",
+                  "color": "#FFFFFF",
+                  "dx": 0,
+                  "dy": 0,
+                  "fontSize": 7.14
+                },
+                "pathD": "M0 -0.5 A0.5 0.5 0 1 1 0 0.5 A0.5 0.5 0 1 1 0 -0.5 Z M0 -0.42 A0.42 0.42 0 1 0 0 0.42 A0.42 0.42 0 1 0 0 -0.42 Z M0 -0.34 A0.34 0.34 0 1 1 0 0.34 A0.34 0.34 0 1 1 0 -0.34 Z"
+              }
+            ],
+            "legend": [
+              {
+                "categoryId": "sensors",
+                "name": "Sensors",
+                "shape": "target",
+                "color": "#AD5813",
+                "badge": "SE",
+                "badgeStyle": "filled",
+                "kind": "point"
+              }
+            ]
+          },
+          "elements": [
+            {
+              "id": "sen2",
+              "categoryId": "sensors",
+              "kind": "point",
+              "productName": "Motion Sensor",
+              "variantName": "Standard",
+              "label": "",
+              "drawn": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "images": {
+    "file-l1": {
+      "mediaType": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+    },
+    "file-l2": {
+      "mediaType": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4ceIEAAS0AlkWLoFAAAAAAElFTkSuQmCC"
+    }
+  }
+}

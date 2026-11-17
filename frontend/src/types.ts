@@ -207,7 +207,10 @@ export interface HomeLevel {
 export interface HomeRooms {
   /** Metres per plan unit. */
   scale: number;
-  wallHeight: number;
+  /** Metres; the planner's default when absent. */
+  wallHeight?: number;
+  /** Per element id: where a device sits when the default placement is wrong. Heights are metres. */
+  mounts?: Record<string, { height?: number; wall?: [[number, number], [number, number]] }>;
   /** Polygons run along the wall centrelines, so neighbours share edges. */
   rooms: { id: string; name: string; polygon: [number, number][] }[];
   walls: { from: [number, number]; to: [number, number]; thickness: number }[];
@@ -271,8 +274,12 @@ export interface QuickItem {
 /** How a plan's background drawing is shown: `soft` fades it back, `original` shows it as drawn. */
 export type DisplayBackground = 'soft' | 'original';
 
+/** Which view a home opens in. */
+export type OpeningView = '2d' | '3d';
+
 export interface DisplaySettings {
   background: DisplayBackground;
+  opening_view?: OpeningView;
 }
 
 /** The `maxsen/home` result. */

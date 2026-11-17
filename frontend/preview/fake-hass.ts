@@ -439,7 +439,7 @@ export function createFakeHass(
   let scenes: StarterScene[] = [];
   /** Scene entity id to the starter scene behind it. */
   let sceneEntities = new Map<string, StarterScene>();
-  let display: DisplaySettings = { background: 'soft' };
+  let display: DisplaySettings = { background: 'soft', opening_view: '2d' };
   let installerMode = opts.installerMode;
   /** Where the home came from: the sample home plays a planner project; an opened file is a file. */
   let source: HomeResponse['source'] = 'planner';
@@ -871,13 +871,23 @@ export function createFakeHass(
   }
 
   function setDisplay(msg: Message): unknown {
-    const background = msg['background'];
-    if (background !== 'soft' && background !== 'original') {
+    const { background, opening_view: openingView } = msg;
+    if (background !== undefined && background !== 'soft' && background !== 'original') {
       throw new CommandError('invalid_format', 'background must be "soft" or "original"');
+    }
+    if (openingView !== undefined && openingView !== '2d' && openingView !== '3d') {
+      throw new CommandError('invalid_format', 'opening_view must be "2d" or "3d"');
     }
     requireHome(msg);
     requireInstaller('Changing the display');
-    display = { background };
+    if (background === undefined && openingView === undefined) {
+      throw new CommandError('invalid_format', 'Nothing to change');
+    }
+    display = {
+      ...display,
+      ...(background === undefined ? {} : { background }),
+      ...(openingView === undefined ? {} : { opening_view: openingView }),
+    };
     emit('home');
     return { display: structuredClone(display) };
   }
@@ -1145,7 +1155,7 @@ export function createFakeHass(
       }
       named = {};
       quickPanel = [];
-      display = { background: 'soft' };
+      display = { background: 'soft', opening_view: '2d' };
       scenes = [];
       sceneEntities = new Map();
       files.clear();

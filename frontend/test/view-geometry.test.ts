@@ -118,6 +118,32 @@ describe('layerOptions', () => {
     expect(layerOptions([plan('smart-home', 'k')])).toEqual([]);
     expect(layerOptions([])).toEqual([]);
   });
+
+  it('adds 3D to a level whose plans share a background, when it can show 3D', () => {
+    expect(layerOptions([plan('smart-home', 'k'), plan('lighting', 'k')], true)).toEqual([
+      'all',
+      'smart-home',
+      'lighting',
+      '3d',
+    ]);
+  });
+
+  it('never offers 3D when the two plans have different backgrounds', () => {
+    expect(layerOptions([plan('smart-home', 'a'), plan('lighting', 'b')], true)).toEqual([
+      'smart-home',
+      'lighting',
+    ]);
+  });
+
+  it('offers the one plan and 3D when a level has a single plan', () => {
+    expect(layerOptions([plan('lighting', 'k')], true)).toEqual(['lighting', '3d']);
+    expect(layerOptions([plan('smart-home', 'k')], true)).toEqual(['smart-home', '3d']);
+    expect(layerOptions([plan('lighting', 'k')], false)).toEqual([]);
+  });
+
+  it('offers nothing for a level with no plans, even with 3D', () => {
+    expect(layerOptions([], true)).toEqual([]);
+  });
 });
 
 describe('placeInside', () => {

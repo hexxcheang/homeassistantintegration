@@ -279,7 +279,10 @@ describe('createFakeHass: websocket', () => {
   });
 
   it('maxsen/home carries the display setting, soft by default', async () => {
-    expect((await getHome(createFakeHass(fresh(), admin))).display).toEqual({ background: 'soft' });
+    expect((await getHome(createFakeHass(fresh(), admin))).display).toEqual({
+      background: 'soft',
+      opening_view: '2d',
+    });
   });
 
   it('maxsen/display/set saves the background, answers with it and tells subscribers', async () => {
@@ -290,9 +293,31 @@ describe('createFakeHass: websocket', () => {
       entry_id: ENTRY,
     });
     const result = await ws(fake, { type: 'maxsen/display/set', background: 'original' });
-    expect(result).toEqual({ display: { background: 'original' } });
-    expect((await getHome(fake)).display).toEqual({ background: 'original' });
+    expect(result).toEqual({ display: { background: 'original', opening_view: '2d' } });
+    expect((await getHome(fake)).display).toEqual({ background: 'original', opening_view: '2d' });
     expect(events).toEqual(['home']);
+  });
+
+  it('maxsen/display/set merges the opening view like the server and leaves the other key alone', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    await ws(fake, { type: 'maxsen/display/set', background: 'original' });
+    const result = await ws(fake, { type: 'maxsen/display/set', opening_view: '3d' });
+    expect(result).toEqual({ display: { background: 'original', opening_view: '3d' } });
+    await ws(fake, { type: 'maxsen/display/set', background: 'soft', opening_view: '2d' });
+    expect((await getHome(fake)).display).toEqual({ background: 'soft', opening_view: '2d' });
+  });
+
+  it('maxsen/display/set refuses a message with neither key, or a bad opening view', async () => {
+    const fake = createFakeHass(fresh(), admin);
+    await expect(ws(fake, { type: 'maxsen/display/set' })).rejects.toMatchObject({
+      code: 'invalid_format',
+    });
+    for (const opening_view of ['4d', '', null, 3]) {
+      await expect(
+        ws(fake, { type: 'maxsen/display/set', opening_view }),
+      ).rejects.toMatchObject({ code: 'invalid_format' });
+    }
+    expect((await getHome(fake)).display).toEqual({ background: 'soft', opening_view: '2d' });
   });
 
   it('maxsen/display/set rejects with not_allowed unless admin and installer mode', async () => {
@@ -304,7 +329,10 @@ describe('createFakeHass: websocket', () => {
       await expect(
         ws(fake, { type: 'maxsen/display/set', background: 'original' }),
       ).rejects.toMatchObject({ code: 'not_allowed' });
-      expect((await getHome(fake)).display).toEqual({ background: 'soft' });
+      await expect(
+        ws(fake, { type: 'maxsen/display/set', opening_view: '3d' }),
+      ).rejects.toMatchObject({ code: 'not_allowed' });
+      expect((await getHome(fake)).display).toEqual({ background: 'soft', opening_view: '2d' });
     }
   });
 
@@ -315,7 +343,7 @@ describe('createFakeHass: websocket', () => {
         ws(fake, { type: 'maxsen/display/set', background }),
       ).rejects.toMatchObject({ code: 'invalid_format' });
     }
-    expect((await getHome(fake)).display).toEqual({ background: 'soft' });
+    expect((await getHome(fake)).display).toEqual({ background: 'soft', opening_view: '2d' });
   });
 
   it('maxsen/links/set links, unlinks and checks element ids', async () => {

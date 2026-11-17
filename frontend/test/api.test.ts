@@ -32,7 +32,9 @@ describe('websocket wrappers', () => {
     await refreshPreview(hass, 'e1', 'file-9');
     await refreshApply(hass, 'e1', 'p1');
     await createStarterScenes(hass, 'e1');
-    await setDisplay(hass, 'e1', 'original');
+    await setDisplay(hass, 'e1', { background: 'original' });
+    await setDisplay(hass, 'e1', { opening_view: '3d' });
+    await setDisplay(hass, 'e1', { background: 'soft', opening_view: '2d' });
 
     expect(callWS.mock.calls.map((c) => c[0])).toEqual([
       { type: 'maxsen/home', entry_id: 'e1' },
@@ -61,6 +63,8 @@ describe('websocket wrappers', () => {
       { type: 'maxsen/refresh/apply', entry_id: 'e1', preview_id: 'p1' },
       { type: 'maxsen/scenes/create_starter', entry_id: 'e1' },
       { type: 'maxsen/display/set', entry_id: 'e1', background: 'original' },
+      { type: 'maxsen/display/set', entry_id: 'e1', opening_view: '3d' },
+      { type: 'maxsen/display/set', entry_id: 'e1', background: 'soft', opening_view: '2d' },
     ]);
   });
 

@@ -122,13 +122,19 @@ export function setQuickPanel(
   return hass.callWS({ type: 'maxsen/quick_panel/set', entry_id: entryId, items });
 }
 
-/** Choose how plan backgrounds look for every screen of this home. Installer mode only. */
+/** Change how this home looks on every screen: the background, the opening view or both. Installer mode only. */
 export function setDisplay(
   hass: HassLike,
   entryId: string,
-  background: DisplayBackground,
+  patch: Partial<DisplaySettings>,
 ): Promise<{ display: DisplaySettings }> {
-  return hass.callWS({ type: 'maxsen/display/set', entry_id: entryId, background });
+  const { background, opening_view } = patch;
+  return hass.callWS({
+    type: 'maxsen/display/set',
+    entry_id: entryId,
+    ...(background === undefined ? {} : { background }),
+    ...(opening_view === undefined ? {} : { opening_view }),
+  });
 }
 
 /** Fetch the planner's current home and report what would change. `fileId` is for homes loaded from a file. */

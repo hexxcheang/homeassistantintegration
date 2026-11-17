@@ -59,7 +59,7 @@ const GLOWING = new Set<string>([...LIGHTING_CATEGORIES, 'smart-switches']);
 /** The categories whose reading is shown as a pill beside the element. */
 const PILLED = new Set<string>(['sensors', 'aircon-controllers', 'curtains-blinds', 'smart-locks']);
 
-const LAYER_LABELS: Record<Layer, string> = { all: 'All', 'smart-home': 'Smart Home', lighting: 'Lighting' };
+const LAYER_LABELS: Record<Layer, string> = { all: 'All', 'smart-home': 'Smart Home', lighting: 'Lighting', '3d': '3D' };
 
 /** What a picker row says when the device has no reading of its own to show. */
 const STATUS_TEXT: Record<VisualState['status'], string> = {
@@ -361,7 +361,7 @@ export class MaxsenFloorplanView extends LitElement {
     const options = layerOptions(all);
     if (options.length === 0) return { plans: all, options, layer: 'all' };
     const layer = options.includes(this._layer) ? this._layer : (options[0] as Layer);
-    return { plans: layer === 'all' ? all : all.filter((p) => p.type === layer), options, layer };
+    return { plans: layer === 'all' || layer === '3d' ? all : all.filter((p) => p.type === layer), options, layer };
   }
 
   /** The area of the drawing in view at 1x: the items of what is shown, or the whole drawing. */

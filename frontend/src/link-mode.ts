@@ -987,7 +987,7 @@ export class MaxsenLinkMode extends LitElement {
     const next = this.home?.display?.background === 'original' ? 'soft' : 'original';
     this._busy = true;
     try {
-      await setDisplay(hass, entryId, next);
+      await setDisplay(hass, entryId, { background: next });
       this._say(next === 'original' ? 'Showing the original background.' : 'Showing the soft background.', false);
     } catch (err) {
       this._say(errorMessage(err, 'Could not change the background. Try again.'), true);

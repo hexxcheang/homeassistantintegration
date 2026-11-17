@@ -22,7 +22,7 @@ export function homeResponse(
     package: overrides.package === undefined ? pkg : overrides.package,
     links: overrides.links ?? {},
     quick_panel: overrides.quick_panel ?? [],
-    display: overrides.display ?? { background: 'soft' },
+    display: overrides.display ?? { background: 'soft', opening_view: '2d' },
     installer_mode: overrides.installer_mode ?? false,
     source: overrides.source ?? 'planner',
     image_urls: Object.fromEntries(Object.keys(images).map((id) => [id, `/api/maxsen/image/e1/${id}`])),

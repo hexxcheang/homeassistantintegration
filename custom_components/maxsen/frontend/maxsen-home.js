@@ -369,10 +369,12 @@ function be(e, t, n) {
 	});
 }
 function xe(e, t, n) {
+	let { background: r, opening_view: i } = n;
 	return e.callWS({
 		type: "maxsen/display/set",
 		entry_id: t,
-		background: n
+		...r === void 0 ? {} : { background: r },
+		...i === void 0 ? {} : { opening_view: i }
 	});
 }
 function Se(e, t, n) {
@@ -1148,13 +1150,18 @@ function Rt(e, t, n, r = .08) {
 		h: G(l - c)
 	};
 }
-function zt(e) {
-	let t = e.some((e) => e.type === "smart-home"), n = e.some((e) => e.type === "lighting");
-	return !t || !n ? [] : e.every((t) => t.background.key === e[0]?.background.key) ? [
+function zt(e, t = !1) {
+	let n = e.some((e) => e.type === "smart-home"), r = e.some((e) => e.type === "lighting");
+	return !n && !r ? [] : n === r ? e.every((t) => t.background.key === e[0]?.background.key) ? t ? [
+		"all",
+		"smart-home",
+		"lighting",
+		"3d"
+	] : [
 		"all",
 		"smart-home",
 		"lighting"
-	] : ["smart-home", "lighting"];
+	] : ["smart-home", "lighting"] : t ? [n ? "smart-home" : "lighting", "3d"] : [];
 }
 function Bt(e, t, n, r, i) {
 	let a = Math.max(i, Math.min(e.x - t.w / 2, n.w - t.w - i)), o = e.y + r, s = e.y - r - t.h, c;
@@ -1175,7 +1182,8 @@ var Vt = 500, Ht = 8, Ut = 300, Wt = 30, Gt = 1, Kt = 6, qt = 22, Jt = 4, q = 14
 ]), an = {
 	all: "All",
 	"smart-home": "Smart Home",
-	lighting: "Lighting"
+	lighting: "Lighting",
+	"3d": "3D"
 }, on = {
 	unlinked: "Not linked",
 	missing: "Device missing",
@@ -1326,7 +1334,7 @@ var mn = class extends H {
 		};
 		let n = t.includes(this._layer) ? this._layer : t[0];
 		return {
-			plans: n === "all" ? e : e.filter((e) => e.type === n),
+			plans: n === "all" || n === "3d" ? e : e.filter((e) => e.type === n),
 			options: t,
 			layer: n
 		};
@@ -3727,7 +3735,7 @@ var _r = class extends H {
 		let n = this.home?.display?.background === "original" ? "soft" : "original";
 		this._busy = !0;
 		try {
-			await xe(e, t, n), this._say(n === "original" ? "Showing the original background." : "Showing the soft background.", !1);
+			await xe(e, t, { background: n }), this._say(n === "original" ? "Showing the original background." : "Showing the soft background.", !1);
 		} catch (e) {
 			this._say(m(e, "Could not change the background. Try again."), !0);
 		} finally {

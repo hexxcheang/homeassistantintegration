@@ -1,6 +1,6 @@
 import type { HomePlan, SceneItem } from './types.ts';
 
-export type Layer = 'all' | 'smart-home' | 'lighting';
+export type Layer = 'all' | 'smart-home' | 'lighting' | '3d';
 
 export interface Box {
   x: number;
@@ -96,13 +96,18 @@ export function contentBox(items: SceneItem[], width: number, height: number, ma
 /**
  * The layers a level can show. Both plans on one background can be shown together (`all`);
  * plans on different backgrounds only one at a time; a single plan needs no choice.
+ * `threeD` says the level can show 3D (a usable rooms layer, WebGL): the option is then added,
+ * except for plans on different backgrounds, which cannot be placed in one model. A single plan
+ * with 3D offers its own layer and 3D.
  */
-export function layerOptions(plans: HomePlan[]): Layer[] {
+export function layerOptions(plans: HomePlan[], threeD = false): Layer[] {
   const hasSmartHome = plans.some((p) => p.type === 'smart-home');
   const hasLighting = plans.some((p) => p.type === 'lighting');
-  if (!hasSmartHome || !hasLighting) return [];
+  if (!hasSmartHome && !hasLighting) return [];
+  if (hasSmartHome !== hasLighting) return threeD ? [hasSmartHome ? 'smart-home' : 'lighting', '3d'] : [];
   const sameBackground = plans.every((p) => p.background.key === plans[0]?.background.key);
-  return sameBackground ? ['all', 'smart-home', 'lighting'] : ['smart-home', 'lighting'];
+  if (!sameBackground) return ['smart-home', 'lighting'];
+  return threeD ? ['all', 'smart-home', 'lighting', '3d'] : ['all', 'smart-home', 'lighting'];
 }
 
 /**

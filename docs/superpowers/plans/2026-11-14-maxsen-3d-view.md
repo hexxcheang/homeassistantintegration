@@ -36,6 +36,7 @@
 6. **Categories the spec does not list** (gateways, network devices, misc smart home): 1.5 m on the nearest wall, like cameras.
 7. **The logo is one dark wordmark**; the light version for the dark look is the same image through a CSS filter.
 8. **Android back** leaves an entered room only in the full panel (not the dashboard card), through one pushed history entry.
+9. **A room can come in several pieces.** A rooms entry with `partOf: "<room id>"` is another area of that room (same name; the planner writes these for a room whose drawn areas do not join). The model keeps each piece as its own floor polygon with `partOf` set. Wherever a room is entered, named, listed as tiles or matched to devices, a piece counts as its parent room: one name label (on the main piece), one room to enter, one tile list. A `partOf` that names no room in the level is ignored (the piece is then its own room).
 
 ## Review Focus
 
@@ -133,7 +134,7 @@ export type V3 = [number, number, number];
 export interface WallPiece { from: V2; to: V2; thickness: number; y0: number; y1: number; kind: 'wall' | 'glass' }
 export interface Box3 { centre: V3; size: V3; turn: number /* degrees about y */; part: 'body' | 'screen' }
 export interface FurnitureBlock { id: string; type: string; roomId: string | null; boxes: Box3[] }
-export interface ThreeRoom { id: string; name: string; polygon: V2[]; centre: V2 }
+export interface ThreeRoom { id: string; name: string; polygon: V2[]; centre: V2; partOf?: string /* id of the room this piece belongs to */ }
 export interface ThreeModel {
   key: string;                 // level id + plan revisions; a new key means rebuild
   wallHeight: number;          // default 2.6
@@ -153,6 +154,7 @@ export interface ThreeModel {
   - an opening that lies on no wall (farther than half the thickness + 0.05 m from every wall line) changes nothing;
   - two openings on one wall are both cut; an opening running past a wall's end is clipped to the wall;
   - `wallHeight` absent → 2.6;
+  - a rooms entry with `partOf` naming another room in the level keeps `partOf` in the model; a `partOf` naming no room is dropped (the piece is its own room);
   - furniture: a wardrobe → one `body` box of its width × height × depth, centred at its spot, `turn` = its rotation; a bed → a low body plus a raised head box on its back side; a sofa → seat plus back; a table or desk → a top plus four legs; a tv → a console plus a `screen` box; an unknown type → one body box of its size;
   - `key` changes when a plan's `revision` changes.
 - [ ] **Step 3: Run** `npm test -- three-scene`. Expected: FAIL.

@@ -105,7 +105,7 @@ async def test_store_round_trip(hass):
         "named": {},
         "quick_panel": [],
         "scenes": [],
-        "display": {"background": "soft"},
+        "display": {"background": "soft", "opening_view": "2d"},
     }
 
     await store.async_save_package({"project": {"id": "p"}})

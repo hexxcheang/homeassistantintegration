@@ -32,7 +32,7 @@ def _empty() -> dict[str, Any]:
         "named": {},
         "quick_panel": [],
         "scenes": [],
-        "display": {"background": "soft"},
+        "display": {"background": "soft", "opening_view": "2d"},
     }
 
 
@@ -68,7 +68,10 @@ class MaxsenStore:
     async def async_load(self) -> None:
         """Load what was saved before; start empty when nothing was."""
         stored = await self._store.async_load()
-        self.data = {**_empty(), **stored} if stored else _empty()
+        data = {**_empty(), **stored} if stored else _empty()
+        # A store saved before a display setting existed lacks that key.
+        data["display"] = {**_empty()["display"], **(data.get("display") or {})}
+        self.data = data
 
     async def async_remove(self) -> None:
         """Delete the saved file."""
@@ -143,9 +146,9 @@ class MaxsenStore:
         await self._async_write(lambda _: {"quick_panel": list(items)})
         self._announce_quick_panel()
 
-    async def async_set_display(self, display: dict[str, str]) -> None:
-        """Replace the display settings shared by every screen of this home."""
-        await self._async_write(lambda _: {"display": dict(display)})
+    async def async_set_display(self, patch: dict[str, str]) -> None:
+        """Change the given display settings shared by every screen of this home."""
+        await self._async_write(lambda data: {"display": {**data["display"], **patch}})
         self._announce("home")
 
     async def async_rebuild_starter_scenes(self) -> list[StarterScene]:

@@ -258,7 +258,7 @@ async def test_home_shows_the_soft_background_for_a_store_saved_before_the_setti
 
     ws = await hass_ws_client()
     resp = await call(ws, "maxsen/home", entry_id=entry.entry_id)
-    assert resp["result"]["display"] == {"background": "soft"}
+    assert resp["result"]["display"] == {"background": "soft", "opening_view": "2d"}
 
 
 async def test_display_set_saves_persists_and_tells_subscribers(
@@ -276,14 +276,22 @@ async def test_display_set_saves_persists_and_tells_subscribers(
     pushed, resp = (first, second) if first["type"] == "event" else (second, first)
     assert pushed["event"] == {"event": "home"}
     assert resp["success"]
-    assert resp["result"] == {"display": {"background": "original"}}
+    assert resp["result"] == {
+        "display": {"background": "original", "opening_view": "2d"}
+    }
 
     home = await call(ws, "maxsen/home", entry_id=entry.entry_id)
-    assert home["result"]["display"] == {"background": "original"}
+    assert home["result"]["display"] == {
+        "background": "original",
+        "opening_view": "2d",
+    }
 
     reloaded = MaxsenStore(hass, entry.entry_id)
     await reloaded.async_load()
-    assert reloaded.data["display"] == {"background": "original"}
+    assert reloaded.data["display"] == {
+        "background": "original",
+        "opening_view": "2d",
+    }
 
 
 async def test_display_set_needs_an_admin(
@@ -296,7 +304,10 @@ async def test_display_set_needs_an_admin(
     )
     assert not resp["success"]
     assert resp["error"]["code"] == "not_allowed"
-    assert entry.runtime_data.data["display"] == {"background": "soft"}
+    assert entry.runtime_data.data["display"] == {
+        "background": "soft",
+        "opening_view": "2d",
+    }
 
 
 async def test_display_set_needs_installer_mode(hass, hass_ws_client, home_package):
@@ -308,7 +319,10 @@ async def test_display_set_needs_installer_mode(hass, hass_ws_client, home_packa
     )
     assert not resp["success"]
     assert resp["error"]["code"] == "not_allowed"
-    assert entry.runtime_data.data["display"] == {"background": "soft"}
+    assert entry.runtime_data.data["display"] == {
+        "background": "soft",
+        "opening_view": "2d",
+    }
 
 
 @pytest.mark.parametrize("background", ["dark", "", None, 1])
@@ -321,7 +335,77 @@ async def test_display_set_rejects_unknown_backgrounds(
     )
     assert not resp["success"]
     assert resp["error"]["code"] == "invalid_format"
-    assert entry.runtime_data.data["display"] == {"background": "soft"}
+    assert entry.runtime_data.data["display"] == {
+        "background": "soft",
+        "opening_view": "2d",
+    }
+
+
+async def test_home_shows_2d_opening_view_for_a_store_saved_before_the_setting(
+    hass, hass_ws_client, hass_storage, entry
+):
+    key = f"maxsen.{entry.entry_id}"
+    hass_storage[key]["data"]["display"] = {"background": "original"}
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    ws = await hass_ws_client()
+    resp = await call(ws, "maxsen/home", entry_id=entry.entry_id)
+    assert resp["result"]["display"] == {"background": "original", "opening_view": "2d"}
+
+
+async def test_display_set_opening_view_keeps_the_background(
+    hass, hass_ws_client, entry
+):
+    ws = await hass_ws_client()
+    resp = await call(
+        ws, "maxsen/display/set", entry_id=entry.entry_id, background="original"
+    )
+    assert resp["success"]
+    resp = await call(
+        ws, "maxsen/display/set", entry_id=entry.entry_id, opening_view="3d"
+    )
+    assert resp["success"]
+    assert resp["result"] == {
+        "display": {"background": "original", "opening_view": "3d"}
+    }
+    resp = await call(
+        ws, "maxsen/display/set", entry_id=entry.entry_id, background="soft"
+    )
+    assert resp["result"] == {"display": {"background": "soft", "opening_view": "3d"}}
+
+
+async def test_display_set_opening_view_needs_installer_mode(
+    hass, hass_ws_client, home_package
+):
+    entry = await setup_entry(hass, home_package, installer_mode=False)
+    ws = await hass_ws_client()
+    resp = await call(
+        ws, "maxsen/display/set", entry_id=entry.entry_id, opening_view="3d"
+    )
+    assert not resp["success"]
+    assert resp["error"]["code"] == "not_allowed"
+    assert entry.runtime_data.data["display"]["opening_view"] == "2d"
+
+
+@pytest.mark.parametrize("opening_view", ["4d", "", None, 3])
+async def test_display_set_rejects_unknown_opening_views(
+    hass, hass_ws_client, entry, opening_view
+):
+    ws = await hass_ws_client()
+    resp = await call(
+        ws, "maxsen/display/set", entry_id=entry.entry_id, opening_view=opening_view
+    )
+    assert not resp["success"]
+    assert resp["error"]["code"] == "invalid_format"
+    assert entry.runtime_data.data["display"]["opening_view"] == "2d"
+
+
+async def test_display_set_needs_something_to_set(hass, hass_ws_client, entry):
+    ws = await hass_ws_client()
+    resp = await call(ws, "maxsen/display/set", entry_id=entry.entry_id)
+    assert not resp["success"]
+    assert resp["error"]["code"] == "invalid_format"
 
 
 # ------------------------------------------------------ maxsen/quick_panel/set

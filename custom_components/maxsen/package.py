@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
+import math
 import re
 from pathlib import Path
 from typing import Any, Literal
@@ -12,6 +14,8 @@ from typing import Any, Literal
 from homeassistant.core import HomeAssistant
 
 from .const import MAX_PACKAGE_BYTES, PACKAGE_FORMAT, PACKAGE_SCHEMA_VERSION
+
+_LOGGER = logging.getLogger(__name__)
 
 PackageReason = Literal[
     "invalid_json",
@@ -54,6 +58,107 @@ def _is_str(value: Any) -> bool:
 
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+MAX_ROOMS = 200
+MAX_WALLS = 2000
+MAX_OPENINGS = 1000
+MAX_FURNITURE = 1000
+
+
+def _is_number(value: Any) -> bool:
+    """A finite number; booleans, NaN and infinity (JSON 1e400) are not."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int too large for a float
+        return False
+
+
+def _is_point(value: Any) -> bool:
+    return isinstance(value, list) and len(value) == 2 and all(map(_is_number, value))
+
+
+def _list_within(value: Any, limit: int) -> bool:
+    return isinstance(value, list) and len(value) <= limit
+
+
+def _room_ok(room: Any) -> bool:
+    if not (isinstance(room, dict) and _is_str(room.get("id")) and _is_str(room.get("name"))):
+        return False
+    polygon = room.get("polygon")
+    return isinstance(polygon, list) and len(polygon) >= 3 and all(map(_is_point, polygon))
+
+
+def _wall_ok(wall: Any) -> bool:
+    if not (isinstance(wall, dict) and _is_point(wall.get("from")) and _is_point(wall.get("to"))):
+        return False
+    thickness = wall.get("thickness")
+    return _is_number(thickness) and 0 < thickness <= 2
+
+
+def _opening_ok(opening: Any) -> bool:
+    if not (
+        isinstance(opening, dict)
+        and opening.get("type") in ("door", "window")
+        and _is_point(opening.get("from"))
+        and _is_point(opening.get("to"))
+    ):
+        return False
+    return all(
+        key not in opening or (_is_number(opening[key]) and opening[key] >= 0)
+        for key in ("sill", "height")
+    )
+
+
+def _rooms_ok(layer: Any) -> bool:
+    if not isinstance(layer, dict):
+        return False
+    scale = layer.get("scale")
+    if not (_is_number(scale) and scale > 0):
+        return False
+    if "wallHeight" in layer:
+        height = layer["wallHeight"]
+        if not (_is_number(height) and 0 < height <= 10):
+            return False
+    if "mounts" in layer and not isinstance(layer["mounts"], dict):
+        return False
+    for key, limit, check in (
+        ("rooms", MAX_ROOMS, _room_ok),
+        ("walls", MAX_WALLS, _wall_ok),
+        ("openings", MAX_OPENINGS, _opening_ok),
+    ):
+        items = layer.get(key)
+        if not (_list_within(items, limit) and all(map(check, items))):
+            return False
+    return True
+
+
+def _furniture_item_ok(item: Any) -> bool:
+    if not (isinstance(item, dict) and _is_str(item.get("id")) and _is_str(item.get("type"))):
+        return False
+    rotation = item.get("rotation")
+    if not (_is_number(rotation) and rotation in (0, 90, 180, 270)):
+        return False
+    if not (_is_number(item.get("x")) and _is_number(item.get("y"))):
+        return False
+    return all(
+        _is_number(item.get(key)) and item[key] > 0 for key in ("width", "depth", "height")
+    )
+
+
+def _rooms_layer_ok(level: dict) -> bool:
+    """Whether the level's rooms layer and furniture are usable for the 3D view."""
+    if "rooms" in level and not _rooms_ok(level["rooms"]):
+        return False
+    if "furniture" in level:
+        furniture = level["furniture"]
+        if not (
+            _list_within(furniture, MAX_FURNITURE) and all(map(_furniture_item_ok, furniture))
+        ):
+            return False
+    return True
 
 
 def _validate_structure(pkg: dict) -> None:
@@ -107,6 +212,14 @@ def parse_package(raw: bytes) -> dict:
         raise PackageError("unsupported_version")
 
     _validate_structure(pkg)
+    for level in pkg["levels"]:
+        if not _rooms_layer_ok(level):
+            level.pop("rooms", None)
+            level.pop("furniture", None)
+            _LOGGER.warning(
+                "Level %s: the rooms layer is not usable, so the 3D view is off for it",
+                level["id"],
+            )
     images = pkg["images"]
     for level in pkg["levels"]:
         for plan in level["plans"]:

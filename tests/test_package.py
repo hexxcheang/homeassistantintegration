@@ -4,6 +4,7 @@ import asyncio
 import base64
 import copy
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -43,6 +44,105 @@ def test_package_with_rooms_and_furniture_parses_unchanged(home_rooms_package):
     assert [r["id"] for r in level["rooms"]["rooms"]] == ["room-living", "room-bedroom"]
     assert {f["type"] for f in level["furniture"]} == {"wardrobe", "bed"}
     assert pkg == home_rooms_package
+
+
+def _set(path_and_value):
+    """Return a mutator that sets one value inside level 1 of the rooms package."""
+    path, value = path_and_value
+
+    def mutate(level):
+        target = level
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+
+    return mutate
+
+
+MALFORMED_ROOMS_LAYERS = {
+    "scale zero": (["rooms", "scale"], 0),
+    "scale text": (["rooms", "scale"], "x"),
+    "scale bool": (["rooms", "scale"], True),
+    "wall height too tall": (["rooms", "wallHeight"], 11),
+    "polygon with two points": (["rooms", "rooms", 0, "polygon"], [[0, 0], [1, 1]]),
+    "wall from with one number": (["rooms", "walls", 0, "from"], [1]),
+    "infinite coordinate": (["rooms", "walls", 0, "from"], [float("inf"), 0]),
+    "nan coordinate": (["rooms", "walls", 0, "to"], [float("nan"), 0]),
+    "wall too thick": (["rooms", "walls", 0, "thickness"], 3),
+    "opening type hatch": (["rooms", "openings", 0, "type"], "hatch"),
+    "opening negative sill": (["rooms", "openings", 0, "sill"], -1),
+    "room id not text": (["rooms", "rooms", 0, "id"], 5),
+    "mounts not a dict": (["rooms", "mounts"], []),
+    "rooms not a dict": (["rooms"], []),
+    "201 rooms": (["rooms", "rooms"], [
+        {"id": f"r{i}", "name": "R", "polygon": [[0, 0], [1, 0], [1, 1]]}
+        for i in range(201)
+    ]),
+    "2001 walls": (["rooms", "walls"], [
+        {"from": [0, 0], "to": [1, 0], "thickness": 0.2} for _ in range(2001)
+    ]),
+    "1001 openings": (["rooms", "openings"], [
+        {"type": "door", "from": [0, 0], "to": [1, 0]} for _ in range(1001)
+    ]),
+    "furniture rotation 45": (["furniture", 0, "rotation"], 45),
+    "furniture rotation true": (["furniture", 0, "rotation"], True),
+    "furniture width negative": (["furniture", 0, "width"], -1),
+    "furniture infinite x": (["furniture", 0, "x"], float("inf")),
+    "furniture without type": (["furniture", 0, "type"], 3),
+    "furniture not a list": (["furniture"], {}),
+    "1001 furniture": (["furniture"], [
+        {"id": f"f{i}", "type": "bed", "x": 0, "y": 0, "rotation": 0,
+         "width": 1, "depth": 1, "height": 1}
+        for i in range(1001)
+    ]),
+}
+
+
+@pytest.mark.parametrize("case", MALFORMED_ROOMS_LAYERS)
+def test_malformed_rooms_layer_is_dropped_and_the_home_still_parses(
+    home_rooms_package, caplog, case
+):
+    _set(MALFORMED_ROOMS_LAYERS[case])(home_rooms_package["levels"][0])
+    raw = to_raw(home_rooms_package)  # allow_nan writes Infinity and NaN literals
+    expected = json.loads(raw)
+    with caplog.at_level(logging.WARNING):
+        pkg = parse_package(raw)
+    level = pkg["levels"][0]
+    assert "rooms" not in level
+    assert "furniture" not in level
+    for key in ("rooms", "furniture"):
+        expected["levels"][0].pop(key, None)
+    assert pkg == expected
+    assert "Level lvl-1" in caplog.text
+
+
+def test_json_1e400_is_an_infinite_coordinate_and_is_dropped(home_rooms_package):
+    raw = to_raw(home_rooms_package).replace(b"504.2", b"1e400", 1)
+    assert b"1e400" in raw
+    level = parse_package(raw)["levels"][0]
+    assert "rooms" not in level and "furniture" not in level
+
+
+def test_valid_rooms_layer_survives_a_round_trip_unchanged(home_rooms_package, caplog):
+    with caplog.at_level(logging.WARNING):
+        assert parse_package(to_raw(home_rooms_package)) == home_rooms_package
+    assert "rooms layer" not in caplog.text
+
+
+def test_furniture_without_rooms_is_kept_when_it_is_valid(home_rooms_package):
+    del home_rooms_package["levels"][0]["rooms"]
+    assert parse_package(to_raw(home_rooms_package)) == home_rooms_package
+
+
+def test_only_the_failing_level_loses_its_rooms_layer(home_rooms_package):
+    second = copy.deepcopy(home_rooms_package["levels"][0])
+    second["id"] = "lvl-2"
+    second["plans"] = []
+    home_rooms_package["levels"].append(second)
+    home_rooms_package["levels"][0]["rooms"]["scale"] = 0
+    pkg = parse_package(to_raw(home_rooms_package))
+    assert "rooms" not in pkg["levels"][0]
+    assert pkg["levels"][1] == second
 
 
 def test_invalid_json():

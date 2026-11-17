@@ -246,7 +246,8 @@ async def ws_quick_panel_set(
     {
         vol.Required("type"): "maxsen/display/set",
         vol.Required("entry_id"): str,
-        vol.Required("background"): vol.In(["soft", "original"]),
+        vol.Optional("background"): vol.In(["soft", "original"]),
+        vol.Optional("opening_view"): vol.In(["2d", "3d"]),
     }
 )
 @websocket_api.async_response
@@ -259,8 +260,13 @@ async def ws_display_set(
     if not _installer_only(connection, msg, entry, "Changing the display"):
         return
 
+    patch = {key: msg[key] for key in ("background", "opening_view") if key in msg}
+    if not patch:
+        connection.send_error(msg["id"], "invalid_format", "Nothing to change")
+        return
+
     store = entry.runtime_data
-    await store.async_set_display({"background": msg["background"]})
+    await store.async_set_display(patch)
     connection.send_result(msg["id"], {"display": store.data["display"]})
 
 
